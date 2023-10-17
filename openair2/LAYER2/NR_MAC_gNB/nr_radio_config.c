@@ -996,6 +996,15 @@ void nr_rrc_config_dl_tda(struct NR_PDSCH_TimeDomainResourceAllocationList *pdsc
   int len_coreset = 1;
   if (curr_bwp < 48)
     len_coreset = 2;
+
+#if defined(ENABLE_TMYTEK_UD_BBOX) || defined(ENABLE_TMYTEK_AIP)
+  // In FR2 with TMYTEK we need to use CORESET with 2 symbols length because 'initialDLBWPcontrolResourceSetZero: 0'
+  // This is required to support 50 MHz bandwidth (32 PRBs) and keep the configuration file with the minimum changes as possible for
+  // the different BWs, thus, for higher bandwidths (100 and 200 MHz) we still need to use 2 symbols CORESET while we use
+  // 'initialDLBWPcontrolResourceSetZero: 0'
+  len_coreset = 2;
+#endif
+
   // setting default TDA for DL with TDA index 0
   struct NR_PDSCH_TimeDomainResourceAllocation *timedomainresourceallocation = CALLOC(1,sizeof(NR_PDSCH_TimeDomainResourceAllocation_t));
   // k0: Slot offset between DCI and its scheduled PDSCH (see TS 38.214 clause 5.1.2.1) When the field is absent the UE applies the value 0.

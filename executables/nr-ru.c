@@ -707,6 +707,9 @@ static radio_tx_gpio_flag_t get_gpio_flags(RU_t *ru, int slot)
       LOG_I(HW, "slot %d, beam %d, flags_gpio %d\n", slot, beam, flags_gpio);
       break;
     }
+    case RU_GPIO_CONTROL_TMYTEK:
+      // Nothing to do
+      break;
     default:
       AssertFatal(false, "illegal GPIO controller %d\n", cfg0->gpio_controller);
   }
@@ -870,6 +873,10 @@ static void fill_rf_config(RU_t *ru, char *rf_config_file)
       LOG_I(PHY, "Setting IF RX frequency to %lu Hz with IF RX frequency offset %d Hz\n", ru->if_frequency, ru->if_freq_offset);
     } else {
       cfg->rx_freq[i] = ru->if_frequency + fp->ul_CarrierFreq - fp->dl_CarrierFreq;
+    }
+
+    if (cfg->gpio_controller == RU_GPIO_CONTROL_TMYTEK) {
+      cfg->center_freq = (double)fp->dl_CarrierFreq;
     }
 
     cfg->rx_gain[i] = ru->max_rxgain-ru->att_rx;
@@ -1675,6 +1682,9 @@ static void NRRCconfig_RU(configmodule_interface_t *cfg)
       } else if (strcmp(str, "interdigital") == 0) {
         ru->openair0_cfg.gpio_controller = RU_GPIO_CONTROL_INTERDIGITAL;
         LOG_I(PHY, "RU GPIO control set as 'interdigital'\n");
+      } else if (strcmp(str, "tmytek") == 0) {
+        ru->openair0_cfg.gpio_controller = RU_GPIO_CONTROL_TMYTEK;
+        LOG_I(PHY, "RU GPIO control set as 'tmytek'\n");
       } else {
         AssertFatal(false, "bad GPIO controller in configuration file: '%s'\n", str);
       }

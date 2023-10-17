@@ -1349,6 +1349,20 @@ target_link_libraries(L2_NR PRIVATE f1ap x2ap s1ap ngap nr_rrc e1ap nr_rlc nr_co
 if(OAI_AERIAL)
     target_compile_definitions(L2_NR PRIVATE ENABLE_AERIAL)
 endif()
+add_boolean_option(OAI_TMYTEK_UD_BBOX OFF "Activate TMYTEK UD BBOX driver" OFF)
+if (OAI_TMYTEK_UD_BBOX)
+  message(STATUS "Enable support for TMYTEK UD BBOX")
+  target_compile_definitions(L2_NR PUBLIC ENABLE_TMYTEK_UD_BBOX)
+else ()
+  message(STATUS "Disable support for TMYTEK UD BBOX")
+endif()
+add_boolean_option(OAI_TMYTEK_AIP OFF "Activate TMYTEK AiP driver" OFF)
+if (OAI_TMYTEK_AIP)
+  message(STATUS "Enable support for TMYTEK AiP")
+  target_compile_definitions(L2_NR PUBLIC ENABLE_TMYTEK_AIP)
+else ()
+  message(STATUS "Disable support for TMYTEK AiP")
+endif()
 if(E2_AGENT)
   target_link_libraries(L2_NR PUBLIC e2_agent e2_agent_arg e2_ran_func_du_cucp_cuup)
   target_compile_definitions(L2_NR PRIVATE ${E2AP_VERSION} ${KPM_VERSION} E2_AGENT)
@@ -1880,6 +1894,12 @@ endif()
 target_link_libraries(nr-softmodem PRIVATE
   asn1_lte_rrc asn1_nr_rrc asn1_s1ap asn1_ngap asn1_m2ap asn1_m3ap asn1_x2ap asn1_f1ap asn1_lpp)
 
+if (OAI_TMYTEK_UD_BBOX)
+  target_compile_definitions(nr-softmodem PUBLIC ENABLE_TMYTEK_UD_BBOX)
+elseif (OAI_TMYTEK_AIP)
+  target_compile_definitions(nr-softmodem PUBLIC ENABLE_TMYTEK_AIP)
+endif ()
+
 add_executable(nr-cuup
   executables/nr-cuup.c
   executables/softmodem-common.c
@@ -1936,6 +1956,11 @@ target_link_libraries(nr-uesoftmodem PRIVATE asn1_nr_rrc_hdrs asn1_lte_rrc_hdrs)
 # force the generation of ASN.1 so that we don't need to wait during the build
 target_link_libraries(nr-uesoftmodem PRIVATE
                       asn1_lte_rrc asn1_nr_rrc asn1_s1ap asn1_ngap asn1_m2ap asn1_m3ap asn1_x2ap asn1_f1ap asn1_lpp)
+if (OAI_TMYTEK_UD_BBOX)
+  target_compile_definitions(nr-uesoftmodem PUBLIC ENABLE_TMYTEK_UD_BBOX)
+elseif (OAI_TMYTEK_AIP)
+  target_compile_definitions(nr-uesoftmodem PUBLIC ENABLE_TMYTEK_AIP)
+endif ()
 
 ###################################"
 # Addexecutables for tests
