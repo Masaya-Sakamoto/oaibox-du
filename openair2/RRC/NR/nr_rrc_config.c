@@ -980,6 +980,12 @@ void nr_rrc_config_dl_tda(struct NR_PDSCH_TimeDomainResourceAllocationList *pdsc
   int len_coreset = 1;
   if (curr_bwp < 48)
     len_coreset = 2;
+  // In FR2 we need to use coreset with 2 symbols length because 'initialDLBWPcontrolResourceSetZero: 0'
+  if (tdd_UL_DL_ConfigurationCommon->pattern1.dl_UL_TransmissionPeriodicity
+      == NR_TDD_UL_DL_Pattern__dl_UL_TransmissionPeriodicity_ms1p25) {
+    len_coreset = 2;
+  }
+
   // setting default TDA for DL with TDA index 0
   struct NR_PDSCH_TimeDomainResourceAllocation *timedomainresourceallocation = CALLOC(1,sizeof(NR_PDSCH_TimeDomainResourceAllocation_t));
   // k0: Slot offset between DCI and its scheduled PDSCH (see TS 38.214 clause 5.1.2.1) When the field is absent the UE applies the value 0.

@@ -177,6 +177,7 @@ typedef enum {
   RU_GPIO_CONTROL_NONE,
   RU_GPIO_CONTROL_GENERIC,
   RU_GPIO_CONTROL_INTERDIGITAL,
+  RU_GPIO_CONTROL_TMYTEK
 } gpio_control_t;
 
 /*! \brief defines the direction of each symbol. Int values intentional and
@@ -304,6 +305,8 @@ typedef struct openair0_config {
   int txfh_cores[8];
   //! select the GPIO control method
   gpio_control_t gpio_controller;
+  // Center frequency for FR2 because we use if_freq in rx_freq and tx_freq
+  double center_freq;
   //! this interface is reused for split 7, so split 7 options provided below
   split7_config_t split7;
 } openair0_config_t;
