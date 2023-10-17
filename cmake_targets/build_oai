@@ -91,7 +91,7 @@ Options:
 --UE-conf-nvram [configuration file]
    Specify conf_nvram_path (default \"$conf_nvram_path\")
 -w | --hardware
-   USRP, BLADERF, LMSSDR, IRIS, SIMU, AW2SORI, AERIAL, None (Default)
+   USRP, BLADERF, LMSSDR, IRIS, SIMU, AW2SORI, AERIAL, TMYTEK-UD-BBOX, TMYTEK-AIP, None (Default)
    Adds this RF board support (in external packages installation and in compilation)
 -t | --transport
    Selects the transport protocol type, options: None, Ethernet, oran_fhlib_5g, oran_fhlib_5g_mplane, WLS
@@ -271,6 +271,14 @@ function main() {
                 "AERIAL"|"Aerial"|"aerial")
                     HW="OAI_AERIAL"
                     CMAKE_CMD="$CMAKE_CMD -DOAI_AERIAL=ON"
+                    ;;
+                "TMYTEK-UD-BBOX"|"tmytek-ud-bbox")
+                    HW="OAI_TMYTEK_UD_BBOX"
+                    CMAKE_CMD="$CMAKE_CMD -DOAI_TMYTEK_UD_BBOX=ON"
+                    ;;
+                "TMYTEK-AIP"|"tmytek-aip")
+                    HW="OAI_TMYTEK_AIP"
+                    CMAKE_CMD="$CMAKE_CMD -DOAI_TMYTEK_AIP=ON"
                     ;;
                 "None")
                     ;;

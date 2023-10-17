@@ -107,6 +107,20 @@ typedef struct {
   openair0_timestamp_t rx_timestamp;
 } usrp_state_t;
 
+#if defined(ENABLE_TMYTEK_UD_BBOX) || defined(ENABLE_TMYTEK_AIP)
+#include <tlkcore_lib.hpp>
+#include <usrp_fbs.hpp>
+
+using namespace tlkcore;
+
+int set_ud_freq(tlkcore_lib::tlkcore_ptr service);
+int update_beam_config(tlkcore_lib::tlkcore_ptr service);
+int fpga_control(tlkcore_lib::tlkcore_ptr service, usrp_state_t *s);
+
+double center_freq = 0;
+double if_freq = 0;
+#endif
+
 //void print_notes(void)
 //{
 // Helpful notes
@@ -324,6 +338,25 @@ static int trx_usrp_start(openair0_device_t *device)
     case RU_GPIO_CONTROL_INTERDIGITAL:
       trx_usrp_start_interdigital_gpio(device, s);
       break;
+    case RU_GPIO_CONTROL_TMYTEK: {
+#if defined(ENABLE_TMYTEK_UD_BBOX) || defined(ENABLE_TMYTEK_AIP)
+      printf("Setup SPI for TMYTEK devices in USRP address %s\n", device->openair0_cfg->sdr_addrs);
+      center_freq = device->openair0_cfg->center_freq;
+      if_freq = device->openair0_cfg->tx_freq[0];
+
+      tlkcore_lib::tlkcore_ptr ptr;
+      ptr = tlkcore_lib::make();
+      // NOTE: Please provide the device config file for lib scanning & init
+      const std::string path = "config/device.conf";
+#ifdef ENABLE_TMYTEK_UD_BBOX
+      ptr->scan_init_dev(path);
+      set_ud_freq(ptr);
+      update_beam_config(ptr);
+#endif
+      fpga_control(ptr, s);
+#endif
+      break;
+    }
     default:
       AssertFatal(false, "illegal GPIO controller %d\n", device->openair0_cfg->gpio_controller);
   }
@@ -1567,3 +1600,81 @@ extern "C" {
 }
 /*@}*/
 }/* extern c */
+
+#if defined(ENABLE_TMYTEK_UD_BBOX) || defined(ENABLE_TMYTEK_AIP)
+const std::vector<std::string> ud_list = {};
+const std::vector<std::string> bf_list = {};
+
+int set_ud_freq(tlkcore_lib::tlkcore_ptr service)
+{
+  for (std::string sn : ud_list) {
+    int freq_rf_khz = (int)(center_freq / 1000);
+    int freq_if_khz = (int)(if_freq / 1000);
+    // Low Side or High Side Injection (LSI or HSI)
+    // NOTE: Use Low Side Injection (LSI), High Side Injection (HSI) causes a IQ swap and COTS UE will not connect!
+    int freq_ud_khz_LSI = freq_rf_khz - freq_if_khz;
+    // int freq_ud_khz_HSI = freq_rf_khz + freq_if_khz;
+
+    LOG_I(HW, "TMYTEK: Setting center_freq %f, if_freq %f\n", center_freq, if_freq);
+    // service->getRecommendLO( sn, freq_ud_khz, freq_rf_khz, bw_khz )
+    // service->checkHarmonics( sn, freq_ud_khz, freq_rf_khz, freq_if_khz );
+    service->set_ud_freq(sn, freq_ud_khz_LSI, freq_rf_khz, freq_if_khz);
+  }
+  return 0;
+}
+
+/***********************************************************************
+ * Setup BBox to fast parallel mode for fast beam steering
+ **********************************************************************/
+int update_beam_config(tlkcore_lib::tlkcore_ptr service)
+{
+  // Setup BBox as fast parallel mode
+  for (std::string sn : bf_list) {
+    bool fbs_mode;
+
+    float fr2_freq_rounded = std::round(center_freq * 2e-9f) / 2.0f; // Possible values are 26.5, 27.0, ,27.5, 28.0, 28.5, 29.0, 29.5 (depending on the given calibration tables)
+
+    // Set all beam configs via csv file
+    if (service->apply_beam_patterns(sn, fr2_freq_rounded) < 0) {
+      printf("[Main] apply_beam_patterns failed\n");
+      return -1;
+    }
+
+    // set fast TX/RX switching mode
+    if (service->get_fast_parallel_mode(sn, fbs_mode) < 0) {
+      printf("[Main] get_fast_parallel_mode: failed\n");
+      return -1;
+    }
+
+    printf("[Main] get_fast_parallel_mode: %d\n", fbs_mode);
+
+    if (fbs_mode == false) {
+      fbs_mode = true;
+      LOG_I(HW, "TMYTEK: Setting fr2_freq_rounded %f\n", fr2_freq_rounded);
+      if (service->set_fast_parallel_mode(sn, fbs_mode, fr2_freq_rounded)) {
+        printf("[Main] set_fast_parallel_mode: failed\n");
+        return -1;
+      }
+    }
+  }
+
+  return 0;
+}
+
+/***********************************************************************
+ * Let usrp process switching beams via GPIO pins
+ **********************************************************************/
+int fpga_control(tlkcore_lib::tlkcore_ptr service, usrp_state_t *s)
+{
+  // Setup UHD for SPI ready, and assign IP to reduce finding time, and assign "" will takes to scan available usrps
+  std::string usrp_addr = ""; //"addr=192.168.100.10";
+  usrp_spi_setup(s->usrp);
+
+  // USE first configured beam for TX and RX mode
+  // int beam_id = 0;
+  // usrp_select_beam_id(MODE_TX, beam_id);
+  // usrp_select_beam_id(MODE_RX, beam_id);
+
+  return 0;
+}
+#endif
