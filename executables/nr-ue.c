@@ -732,6 +732,13 @@ void *UE_thread(void *arg)
   }
 
   UE->is_synchronized = 0;
+#if defined(ENABLE_TMYTEK_UD_BBOX) || defined(ENABLE_TMYTEK_AIP)
+  if (!IS_SOFTMODEM_RFSIM) {
+    // Hardcoded value! Need to get it from the command line
+    UE->rfdevice.openair0_cfg->gpio_controller = RU_GPIO_CONTROL_TMYTEK;
+    UE->rfdevice.openair0_cfg->center_freq = (double)UE->frame_parms.dl_CarrierFreq;
+  }
+#endif
   InitSinLUT();
 
   notifiedFIFO_t nf;
