@@ -453,6 +453,21 @@ static NR_UE_NR_Capability_t *get_ue_nr_cap_from_ho_prep_info(uint8_t *buf, uint
   return cap;
 }
 
+static NR_MeasConfig_t *get_nr_meas_config(uint8_t *buf, uint32_t len)
+{
+  if (buf == NULL || len == 0)
+    return NULL;
+
+  NR_MeasConfig_t *meas_config = NULL;
+  asn_dec_rval_t dec_rval = uper_decode(NULL, &asn_DEF_NR_MeasConfig, (void **)&meas_config, buf, len, 0, 0);
+  if (dec_rval.code != RC_OK) {
+    LOG_E(NR_MAC, "cannot decode NR MeasConfig, ignoring\n");
+    ASN_STRUCT_FREE(asn_DEF_NR_MeasConfig, meas_config);
+    return NULL;
+  }
+  return meas_config;
+}
+
 NR_CellGroupConfig_t *clone_CellGroupConfig(const NR_CellGroupConfig_t *orig)
 {
   uint8_t buf[16636];
@@ -515,6 +530,7 @@ void ue_context_setup_request(const f1ap_ue_context_setup_t *req)
   bool ue_id_provided = resp.gNB_DU_ue_id > 0 && resp.gNB_DU_ue_id < 0xffff;
 
   NR_UE_NR_Capability_t *ue_cap = NULL;
+  NR_MeasConfig_t *ue_meas_config = NULL;
   if (req->cu_to_du_rrc_information != NULL) {
     const cu_to_du_rrc_information_t *cu2du = req->cu_to_du_rrc_information;
     AssertFatal(cu2du->cG_ConfigInfo == NULL, "CG-ConfigInfo not handled\n");
@@ -523,7 +539,8 @@ void ue_context_setup_request(const f1ap_ue_context_setup_t *req)
     } else if (cu2du->uE_CapabilityRAT_ContainerList != NULL) {
       ue_cap = get_ue_nr_cap(req->gNB_DU_ue_id, cu2du->uE_CapabilityRAT_ContainerList, cu2du->uE_CapabilityRAT_ContainerList_length);
     }
-    AssertFatal(cu2du->measConfig == NULL, "MeasConfig not handled\n");
+    if (cu2du->measConfig != NULL)
+      ue_meas_config = get_nr_meas_config(cu2du->measConfig, cu2du->measConfig_length);
   }
 
   NR_SCHED_LOCK(&mac->sched_lock);
@@ -537,6 +554,10 @@ void ue_context_setup_request(const f1ap_ue_context_setup_t *req)
     UE = find_nr_UE(&mac->UE_info, req->gNB_DU_ue_id);
   }
   AssertFatal(UE, "no UE found or could not be created, but UE Context Setup Failed not implemented\n");
+
+  if (UE->meas_config && ue_meas_config)
+    ASN_STRUCT_FREE(asn_DEF_NR_MeasConfig, UE->meas_config);
+  UE->meas_config = ue_meas_config;
 
   NR_CellGroupConfig_t *new_CellGroup = clone_CellGroupConfig(UE->CellGroup);
 
@@ -612,12 +633,13 @@ void ue_context_modification_request(const f1ap_ue_context_modif_req_t *req)
   };
 
   NR_UE_NR_Capability_t *ue_cap = NULL;
+  NR_MeasConfig_t *ue_meas_config = NULL;
   if (req->cu_to_du_rrc_information != NULL) {
-    AssertFatal(req->cu_to_du_rrc_information->cG_ConfigInfo == NULL, "CG-ConfigInfo not handled\n");
-    ue_cap = get_ue_nr_cap(req->gNB_DU_ue_id,
-                           req->cu_to_du_rrc_information->uE_CapabilityRAT_ContainerList,
-                           req->cu_to_du_rrc_information->uE_CapabilityRAT_ContainerList_length);
-    AssertFatal(req->cu_to_du_rrc_information->measConfig == NULL, "MeasConfig not handled\n");
+    const cu_to_du_rrc_information_t *cu2du = req->cu_to_du_rrc_information;
+    AssertFatal(cu2du->cG_ConfigInfo == NULL, "CG-ConfigInfo not handled\n");
+    ue_cap = get_ue_nr_cap(req->gNB_DU_ue_id, cu2du->uE_CapabilityRAT_ContainerList, cu2du->uE_CapabilityRAT_ContainerList_length);
+    if (cu2du->measConfig != NULL)
+      ue_meas_config = get_nr_meas_config(cu2du->measConfig, cu2du->measConfig_length);
   }
 
   NR_SCHED_LOCK(&mac->sched_lock);
@@ -627,6 +649,10 @@ void ue_context_modification_request(const f1ap_ue_context_modif_req_t *req)
     NR_SCHED_UNLOCK(&mac->sched_lock);
     return;
   }
+
+  if (UE->meas_config && ue_meas_config)
+    ASN_STRUCT_FREE(asn_DEF_NR_MeasConfig, UE->meas_config);
+  UE->meas_config = ue_meas_config;
 
   NR_CellGroupConfig_t *new_CellGroup = clone_CellGroupConfig(UE->CellGroup);
 
