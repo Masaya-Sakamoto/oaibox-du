@@ -1271,7 +1271,62 @@ static void process_Event_Based_Measurement_Report(gNB_RRC_UE_t *ue, NR_ReportCo
 
   switch (event_triggered->eventId.present) {
     case NR_EventTriggerConfig__eventId_PR_eventA2:
-      LOG_I(NR_RRC, "HO LOG: Event A2 (Serving becomes worse than threshold)\n");
+      LOG_W(NR_RRC, "HO LOG: Event A2 (Serving becomes worse than threshold)\n");
+      const NR_MeasResults_t *measResults = &measurementReport->criticalExtensions.choice.measurementReport->measResults;
+
+      for (int serving_cell_idx = 0; serving_cell_idx < measResults->measResultServingMOList.list.count; serving_cell_idx++) {
+        const NR_MeasResultServMO_t *meas_result_serv_MO = measResults->measResultServingMOList.list.array[serving_cell_idx];
+        servingCellId = *(meas_result_serv_MO->measResultServingCell.physCellId);
+        if (meas_result_serv_MO->measResultServingCell.measResult.cellResults.resultsSSB_Cell) {
+          servingCellRSRP = *(meas_result_serv_MO->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrp) - 157;
+        } else {
+          servingCellRSRP = *(meas_result_serv_MO->measResultServingCell.measResult.cellResults.resultsCSI_RS_Cell->rsrp) - 157;
+        }
+        LOG_I(NR_RRC, "Serving Cell %d RSRP: %d\n", servingCellId, servingCellRSRP);
+      }
+
+      gNB_RRC_INST *rrc = RC.nrrrc[0];
+      const f1ap_served_cell_info_t *serving_cell = get_cell_information_by_phycellId(servingCellId);
+      nr_rrc_du_container_t *source_du = get_du_by_cell_id(rrc, serving_cell->nr_cellid);
+      DevAssert(source_du);
+      nr_rrc_du_container_t *source_du_aux = get_du_for_ue(rrc, ue->rrc_ue_id);
+      if (source_du != source_du_aux) {
+        LOG_E(NR_RRC, "Ignore Measurement Report\n");
+        break;
+      }
+
+      // TODO: Implement a criterion to select the neighboring cell
+      f1ap_served_cell_info_t *neigh_cell = NULL;
+      seq_arr_t *neighbour_cell_configuration = rrc->neighbour_cell_configuration;
+      if (!neighbour_cell_configuration) {
+        LOG_E(NR_RRC, "No neighboring configured!\n");
+        break;
+      }
+      for (int cellIdx = 0; cellIdx < neighbour_cell_configuration->size; cellIdx++) {
+        neighbour_cell_configuration_t *neighbour_config =
+            (neighbour_cell_configuration_t *)seq_arr_at(neighbour_cell_configuration, cellIdx);
+        if (!neighbour_config)
+          continue;
+        for (int neighbourIdx = 0; neighbourIdx < neighbour_config->neighbour_cells->size; neighbourIdx++) {
+          nr_neighbour_gnb_configuration_t *neighbour =
+              (nr_neighbour_gnb_configuration_t *)seq_arr_at(neighbour_config->neighbour_cells, neighbourIdx);
+          if (servingCellId != neighbour->physicalCellId)
+            neigh_cell = (f1ap_served_cell_info_t *)get_cell_information_by_phycellId(neighbour->physicalCellId);
+        }
+      }
+
+      if (!neigh_cell) {
+        LOG_E(NR_RRC, "No neighboring cells found!\n");
+        break;
+      }
+
+      nr_rrc_du_container_t *target_du = get_du_by_cell_id(rrc, neigh_cell->nr_cellid);
+      if (!target_du) {
+        LOG_E(NR_RRC, "Target gNB-DU for cellid %li was not found!\n", neigh_cell->nr_cellid);
+        break;
+      }
+      nr_rrc_trigger_f1_ho(rrc, ue, source_du, target_du);
+
       break;
 
     case NR_EventTriggerConfig__eventId_PR_eventA3: {
@@ -2415,10 +2470,19 @@ static void print_rrc_meas(FILE *f, const NR_MeasResults_t *measresults)
             measresultservmo->servCellId,
             *measresultnr->physCellId);
   if (mqr != NULL) {
-    const long rrsrp = *mqr->rsrp - 156;
-    const float rrsrq = (float) (*mqr->rsrq - 87) / 2.0f;
-    const float rsinr = (float) (*mqr->sinr - 46) / 2.0f;
-    fprintf(f, "RSRP %ld dBm RSRQ %.1f dB SINR %.1f dB\n", rrsrp, rrsrq, rsinr);
+    if (mqr->rsrp) {
+      const long rrsrp = *mqr->rsrp - 156;
+      fprintf(f, "RSRP %ld dBm ", rrsrp);
+    }
+    if (mqr->rsrq) {
+      const float rrsrq = (float)(*mqr->rsrq - 87) / 2.0f;
+      fprintf(f, "RSRQ %.1f dB ", rrsrq);
+    }
+    if (mqr->sinr) {
+      const float rsinr = (float)(*mqr->sinr - 46) / 2.0f;
+      fprintf(f, "SINR %.1f dB ", rsinr);
+    }
+    fprintf(f, "\n");
   } else {
     fprintf(f, "NOT PROVIDED\n");
   }
