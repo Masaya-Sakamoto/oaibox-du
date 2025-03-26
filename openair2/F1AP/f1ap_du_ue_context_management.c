@@ -186,6 +186,11 @@ int DU_handle_UE_CONTEXT_SETUP_REQUEST(instance_t instance, sctp_assoc_t assoc_i
       cu2du->uE_CapabilityRAT_ContainerList_length = cu2duie->uE_CapabilityRAT_ContainerList->size;
       LOG_D(F1AP, "Size f1ap_ue_context_setup_req->cu_to_du_rrc_information->uE_CapabilityRAT_ContainerList_length: %d \n", f1ap_ue_context_setup_req->cu_to_du_rrc_information->uE_CapabilityRAT_ContainerList_length);
     }
+    if (cu2duie->measConfig != NULL) {
+      cu2du->measConfig = calloc_or_fail(1, cu2duie->measConfig->size);
+      memcpy(cu2du->measConfig, cu2duie->measConfig->buf, cu2duie->measConfig->size);
+      cu2du->measConfig_length = cu2duie->measConfig->size;
+    }
     if (cu2duie->iE_Extensions != NULL) {
       const F1AP_ProtocolExtensionContainer_10696P60_t *ext = (const F1AP_ProtocolExtensionContainer_10696P60_t *)cu2duie->iE_Extensions;
       for (int i = 0; i < ext->list.count; ++i) {
@@ -1092,6 +1097,11 @@ int DU_handle_UE_CONTEXT_MODIFICATION_REQUEST(instance_t instance, sctp_assoc_t 
       AssertFatal(cu2du->uE_CapabilityRAT_ContainerList != NULL, "out of memory\n");
       cu2du->uE_CapabilityRAT_ContainerList_length = uecap->size;
       memcpy(cu2du->uE_CapabilityRAT_ContainerList, uecap->buf, uecap->size);
+    }
+    if (cu2duie->measConfig != NULL) {
+      cu2du->measConfig = calloc_or_fail(1, cu2duie->measConfig->size);
+      memcpy(cu2du->measConfig, cu2duie->measConfig->buf, cu2duie->measConfig->size);
+      cu2du->measConfig_length = cu2duie->measConfig->size;
     }
   }
 
