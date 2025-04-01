@@ -438,7 +438,10 @@ static void UE_synch(void *arg) {
 
     // rerun with new cell parameters and frequency-offset
     // todo: the freq_offset computed on DL shall be scaled before being applied to UL
-    nr_rf_card_config_freq(cfg0, ul_carrier, dl_carrier, freq_offset);
+    nr_rf_card_config_freq(&openair0_cfg[UE->rf_map.card],
+                           (uint64_t)openair0_cfg[UE->rf_map.card].tx_freq[0],
+                           (uint64_t)openair0_cfg[UE->rf_map.card].rx_freq[0],
+                           freq_offset);
 
     if (get_nrUE_params()->agc) {
       nr_ue_adjust_rx_gain(UE, cfg0, UE->adjust_rxgain);
@@ -453,6 +456,20 @@ static void UE_synch(void *arg) {
           cfg0->tx_freq[0]);
 
     UE->rfdevice.trx_set_freq_func(&UE->rfdevice, cfg0);
+    LOG_A(PHY,
+          "Adjusting hardware frequency offset to %d Hz (computed SSB offset %d Hz)\n",
+          (int)((double)dl_carrier - openair0_cfg[UE->rf_map.card].rx_freq[0]),
+          UE->common_vars.freq_offset);
+
+    if (abs(UE->common_vars.freq_offset) > abs(UE->frame_parms.subcarrier_spacing / 100)) {
+      LOG_W(PHY,
+            "Computed SSB offset %d Hz > %d Hz, resynchronizing again...\n",
+            UE->common_vars.freq_offset,
+            (UE->frame_parms.subcarrier_spacing / 100));
+      // Reset frequency offset after applying new frequency with nr_rf_card_config_freq
+      UE->common_vars.freq_offset = 0;
+      return;
+    }
     UE->is_synchronized = 1;
   } else {
     int gain_change = 0;
@@ -955,6 +972,10 @@ void *UE_thread(void *arg)
   int ntn_koffset = 0;
 
   int duration_rx_to_tx = NR_UE_CAPABILITY_SLOT_RX_TO_TX;
+  if (get_softmodem_params()->numerology == 3) {
+    // Increase value from 3 to 5 to avoid LLLs on the UE
+    duration_rx_to_tx = 5;
+  }
   int nr_slot_tx_offset = 0;
   bool update_ntn_system_information = false;
 

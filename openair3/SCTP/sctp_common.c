@@ -63,6 +63,12 @@ int sctp_set_init_opt(int sd, uint16_t instreams, uint16_t outstreams,
     return -1;
   }
 
+  if (setsockopt(sd, IPPROTO_SCTP, SCTP_NODELAY, &init, sizeof(struct sctp_initmsg)) < 0) {
+    SCTP_ERROR("setsockopt SCTP_NODELAY failed: %d:%s\n", errno, strerror(errno));
+    close(sd);
+    return -1;
+  }
+
   /* Allow socket reuse */
   if (setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
     SCTP_ERROR("setsockopt SO_REUSEADDR failed (%d:%s)\n", errno, strerror(errno));

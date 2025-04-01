@@ -1146,6 +1146,10 @@ static void config_pucch_resset0(NR_PUCCH_Config_t *pucch_Config,
   NR_PUCCH_Resource_t *pucchres0 = calloc(1,sizeof(*pucchres0));
   pucchres0->pucch_ResourceId = *pucchid;
   pucchres0->startingPRB = (PUCCH2_SIZE * num_pucch2) + uid;
+  pucchres0->startingPRB = (PUCCH2_SIZE * num_pucch2 + 2) + (uid * 2);
+  if (pucchres0->startingPRB >= curr_bwp) {
+    pucchres0->startingPRB = (pucchres0->startingPRB % curr_bwp) + (PUCCH2_SIZE * num_pucch2 + 3) - (curr_bwp % 2);
+  }
   AssertFatal(pucchres0->startingPRB < curr_bwp, "Not enough resources in current BWP (size %d) to allocate uid %d\n", curr_bwp, uid);
   pucchres0->intraSlotFrequencyHopping = NULL;
   pucchres0->secondHopPRB = NULL;
@@ -1199,7 +1203,7 @@ static void config_pucch_resset1(NR_PUCCH_Config_t *pucch_Config,
   pucchfmt2->interslotFrequencyHopping = NULL;
   pucchfmt2->additionalDMRS = NULL;
   pucchfmt2->maxCodeRate = calloc(1,sizeof(*pucchfmt2->maxCodeRate));
-  *pucchfmt2->maxCodeRate = NR_PUCCH_MaxCodeRate_zeroDot15;
+  *pucchfmt2->maxCodeRate = NR_PUCCH_MaxCodeRate_zeroDot35;
   pucchfmt2->nrofSlots = NULL;
   pucchfmt2->pi2BPSK = NULL;
 

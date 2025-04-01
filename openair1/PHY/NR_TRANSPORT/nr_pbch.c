@@ -48,11 +48,13 @@ const uint8_t nr_pbch_payload_interleaving_pattern[32] = {16, 23, 18, 17, 8, 30,
                                                    };
 
 void nr_generate_pbch_dmrs(uint32_t *gold_pbch_dmrs,
-                           c16_t *txdataF,
+                           c16_t **txdataF,
+                           int txdataF_offset,
                            int16_t amp,
                            uint8_t ssb_start_symbol,
                            nfapi_nr_config_request_scf_t *config,
-                           NR_DL_FRAME_PARMS *frame_parms)
+                           NR_DL_FRAME_PARMS *frame_parms,
+                           c16_t *w)
 {
   int k,l;
   //int16_t a;
@@ -87,7 +89,11 @@ void nr_generate_pbch_dmrs(uint32_t *gold_pbch_dmrs,
 #ifdef DEBUG_PBCH_DMRS
     printf("m %d at k %d of l %d\n", m, k, l);
 #endif
-    txdataF[l * frame_parms->ofdm_symbol_size + k] = c16mulRealShift(mod_dmrs[m], amp, 15);
+    for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+      c16_t *txF = &txdataF[atx][txdataF_offset];
+      c16_t d = c16mulRealShift(mod_dmrs[m], amp, 15);
+      txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+    }
     k+=4;
 
     if (k >= frame_parms->ofdm_symbol_size)
@@ -102,7 +108,11 @@ void nr_generate_pbch_dmrs(uint32_t *gold_pbch_dmrs,
 #ifdef DEBUG_PBCH_DMRS
     printf("m %d at k %d of l %d\n", m, k, l);
 #endif
-    txdataF[l * frame_parms->ofdm_symbol_size + k] = c16mulRealShift(mod_dmrs[m], amp, 15);
+    for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+      c16_t *txF = &txdataF[atx][txdataF_offset];
+      c16_t d = c16mulRealShift(mod_dmrs[m], amp, 15);
+      txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+    }
 #ifdef DEBUG_PBCH_DMRS
     printf("(%d,%d)\n",
            ((int16_t *)txdataF)[(l*frame_parms->ofdm_symbol_size + k)<<1],
@@ -122,7 +132,11 @@ void nr_generate_pbch_dmrs(uint32_t *gold_pbch_dmrs,
 #ifdef DEBUG_PBCH_DMRS
     printf("m %d at k %d of l %d\n", m, k, l);
 #endif
-    txdataF[l * frame_parms->ofdm_symbol_size + k] = c16mulRealShift(mod_dmrs[m], amp, 15);
+    for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+      c16_t *txF = &txdataF[atx][txdataF_offset];
+      c16_t d = c16mulRealShift(mod_dmrs[m], amp, 15);
+      txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+    }
     k+=4;
 
     if (k >= frame_parms->ofdm_symbol_size)
@@ -246,12 +260,14 @@ uint32_t nr_pbch_extra_byte_generation(int sfn, int n_hf, int ssb_index, int ssb
 
 void nr_generate_pbch(PHY_VARS_gNB *gNB,
                       const nfapi_nr_dl_tti_ssb_pdu *ssb_pdu,
-                      c16_t *txdataF,
+                      c16_t **txdataF,
+                      int txdataF_offset,
                       uint8_t ssb_start_symbol,
                       uint8_t n_hf,
                       int sfn,
                       nfapi_nr_config_request_scf_t *config,
-                      NR_DL_FRAME_PARMS *frame_parms)
+                      NR_DL_FRAME_PARMS *frame_parms,
+                      c16_t *w)
 {
   LOG_D(PHY, "PBCH generation started\n");
   ///Payload generation
@@ -365,7 +381,11 @@ void nr_generate_pbch(PHY_VARS_gNB *gNB,
 #ifdef DEBUG_PBCH
       printf("m %d ssb_sc_idx %d at k %d of l %d\n", m, ssb_sc_idx, k, l);
 #endif
-      txdataF[l * frame_parms->ofdm_symbol_size + k] = c16mulRealShift(mod_pbch_e[m], amp, 15);
+      for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+        c16_t *txF = &txdataF[atx][txdataF_offset];
+        c16_t d = c16mulRealShift(mod_pbch_e[m], amp, 15);
+        txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+      }
       k++;
       m++;
     }
@@ -387,7 +407,11 @@ void nr_generate_pbch(PHY_VARS_gNB *gNB,
 #ifdef DEBUG_PBCH
       printf("m %d ssb_sc_idx %d at k %d of l %d\n", m, ssb_sc_idx, k, l);
 #endif
-      txdataF[l * frame_parms->ofdm_symbol_size + k] = c16mulRealShift(mod_pbch_e[m], amp, 15);
+      for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+        c16_t *txF = &txdataF[atx][txdataF_offset];
+        c16_t d = c16mulRealShift(mod_pbch_e[m], amp, 15);
+        txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+      }
       k++;
       m++;
     }
@@ -411,7 +435,11 @@ void nr_generate_pbch(PHY_VARS_gNB *gNB,
 #ifdef DEBUG_PBCH
       printf("m %d ssb_sc_idx %d at k %d of l %d\n", m, ssb_sc_idx, k, l);
 #endif
-      txdataF[l * frame_parms->ofdm_symbol_size + k] = c16mulRealShift(mod_pbch_e[m], amp, 15);
+      for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+        c16_t *txF = &txdataF[atx][txdataF_offset];
+        c16_t d = c16mulRealShift(mod_pbch_e[m], amp, 15);
+        txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+      }
       k++;
       m++;
     }
@@ -433,7 +461,11 @@ void nr_generate_pbch(PHY_VARS_gNB *gNB,
 #ifdef DEBUG_PBCH
       printf("m %d ssb_sc_idx %d at k %d of l %d\n", m, ssb_sc_idx, k, l);
 #endif
-      txdataF[l * frame_parms->ofdm_symbol_size + k] = c16mulRealShift(mod_pbch_e[m], amp, 15);
+      for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+        c16_t *txF = &txdataF[atx][txdataF_offset];
+        c16_t d = c16mulRealShift(mod_pbch_e[m], amp, 15);
+        txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+      }
       k++;
       m++;
     }

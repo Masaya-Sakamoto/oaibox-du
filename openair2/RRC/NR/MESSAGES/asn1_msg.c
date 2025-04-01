@@ -424,7 +424,7 @@ NR_RadioBearerConfig_t *get_default_rbconfig(int eps_bearer_id,
   drb->outOfOrderDelivery = NULL;
 
   drb_ToAddMod->pdcp_Config->moreThanOneRLC = NULL;
-  asn1cCallocOne(drb_ToAddMod->pdcp_Config->t_Reordering, NR_PDCP_Config__t_Reordering_ms100);
+  asn1cCallocOne(drb_ToAddMod->pdcp_Config->t_Reordering, NR_PDCP_Config__t_Reordering_ms1000);
   drb_ToAddMod->pdcp_Config->ext1 = NULL;
 
   asn1cSeqAdd(&rbconfig->drb_ToAddModList->list,drb_ToAddMod);
@@ -1471,7 +1471,7 @@ NR_MeasConfig_t *get_MeasConfig(const NR_MeasTiming_t *mt,
     if (measurementConfiguration->per_event) {
       for (uint8_t neighbourIdx = 0; neighbourIdx < neighbourConfiguration->size; neighbourIdx++) {
         const nr_neighbour_gnb_configuration_t *neighbourCell = seq_arr_at(neighbourConfiguration, neighbourIdx);
-        NR_MeasObjectToAddMod_t *mo_neighbour = get_MeasObject(ft, band, neighbourCell->absoluteFrequencySSB, neighbourIdx + 2);
+        NR_MeasObjectToAddMod_t *mo_neighbour = get_MeasObject(ft, neighbourCell->band, neighbourCell->absoluteFrequencySSB, neighbourIdx + 2);
         NR_MeasObjectNR_t *monr = mo_neighbour->measObject.choice.measObjectNR;
         monr->cellsToAddModList = calloc_or_fail(1, sizeof(*monr->cellsToAddModList));
         NR_CellsToAddMod_t *cell = calloc_or_fail(1, sizeof(*cell));

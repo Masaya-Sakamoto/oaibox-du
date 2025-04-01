@@ -53,11 +53,13 @@ int nr_generate_prs(int slot,
 @param
 @returns 0 on success
  */
-int nr_generate_pss(c16_t *txdataF,
+int nr_generate_pss(c16_t **txdataF,
+                    int txdataF_offset,
                     int16_t amp,
                     uint8_t ssb_start_symbol,
                     nfapi_nr_config_request_scf_t *config,
-                    NR_DL_FRAME_PARMS *frame_parms);
+                    NR_DL_FRAME_PARMS *frame_parms,
+                    c16_t *w);
 
 /*!
 \fn int nr_generate_sss
@@ -65,11 +67,13 @@ int nr_generate_pss(c16_t *txdataF,
 @param
 @returns 0 on success
  */
-int nr_generate_sss(c16_t *txdataF,
+int nr_generate_sss(c16_t **txdataF,
+                    int txdataF_offset,
                     int16_t amp,
                     uint8_t ssb_start_symbol,
                     nfapi_nr_config_request_scf_t *config,
-                    NR_DL_FRAME_PARMS *frame_parms);
+                    NR_DL_FRAME_PARMS *frame_parms,
+                    c16_t *w);
 
 /*!
 \fn void nr_generate_pbch_dmrs
@@ -77,11 +81,13 @@ int nr_generate_sss(c16_t *txdataF,
 @param
  */
 void nr_generate_pbch_dmrs(uint32_t *gold_pbch_dmrs,
-                           c16_t *txdataF,
+                           c16_t **txdataF,
+                           int txdataF_offset,
                            int16_t amp,
                            uint8_t ssb_start_symbol,
                            nfapi_nr_config_request_scf_t *config,
-                           NR_DL_FRAME_PARMS *frame_parms);
+                           NR_DL_FRAME_PARMS *frame_parms,
+                           c16_t *w);
 
 /*!
 \fn void nr_generate_pbch
@@ -90,12 +96,14 @@ void nr_generate_pbch_dmrs(uint32_t *gold_pbch_dmrs,
  */
 void nr_generate_pbch(PHY_VARS_gNB *gNB,
                       const nfapi_nr_dl_tti_ssb_pdu *ssb_pdu,
-                      c16_t *txdataF,
+                      c16_t **txdataF,
+                      int txdataF_offset,
                       uint8_t ssb_start_symbol,
                       uint8_t n_hf,
                       int sfn,
                       nfapi_nr_config_request_scf_t *config,
-                      NR_DL_FRAME_PARMS *frame_parms);
+                      NR_DL_FRAME_PARMS *frame_parms,
+                      c16_t *w);
 
 /*!
 \fn int nr_generate_pbch

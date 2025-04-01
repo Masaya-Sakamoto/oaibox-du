@@ -77,6 +77,8 @@ void clear_nr_nfapi_information(gNB_MAC_INST *gNB,
 
 void nr_mac_update_timers(module_id_t module_id, frame_t frame, slot_t slot);
 
+void nr_bwp_switching(module_id_t module_id, int ue_id, int dl_bwp_id, int ul_bwp_id);
+
 void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame_rxP, slot_t slot_rxP, NR_Sched_Rsp_t *sched_info);
 
 /* \brief main DL scheduler function. Calls a preprocessor to decide on
@@ -435,6 +437,8 @@ int get_mcs_from_bler(const NR_bler_options_t *bler_options,
                       NR_bler_stats_t *bler_stats,
                       int max_mcs,
                       frame_t frame);
+
+void get_nssai_sched_coeff(nssai_config_t *nssai_config, frame_t frame, slot_t slot, int slots_per_frame);
 
 int ul_buffer_index(int frame, int slot, int slots_per_frame, int size);
 void UL_tti_req_ahead_initialization(gNB_MAC_INST *gNB, int n, int CCid, frame_t frameP, int slotP);

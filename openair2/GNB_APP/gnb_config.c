@@ -834,7 +834,7 @@ void RCconfig_verify(configmodule_interface_t *cfg, ngran_node_t node_type)
     verify_gnb_param_notset(gnbp, GNB_ENABLE_SDAP_IDX, GNB_CONFIG_STRING_ENABLE_SDAP);
     verify_gnb_param_notset(gnbp, GNB_DRBS, GNB_CONFIG_STRING_DRBS);
 
-    verify_section_notset(cfg, GNB_CONFIG_STRING_GNB_LIST ".", GNB_CONFIG_STRING_AMF_IP_ADDRESS);
+    //verify_section_notset(cfg, GNB_CONFIG_STRING_GNB_LIST ".[0]", GNB_CONFIG_STRING_AMF_IP_ADDRESS);
     verify_section_notset(cfg, NULL, CONFIG_STRING_SECURITY);
   } // else nothing to be checked
 
@@ -1888,6 +1888,7 @@ static void fill_neighbour_cell_configuration(uint8_t gnb_idx, gNB_RRC_INST *rrc
       neighbourCell->nrcell_id = (uint64_t) * (NeighbourCellParamList.paramarray[l][GNB_CONFIG_N_CELL_NR_CELLID_IDX].u64ptr);
       neighbourCell->physicalCellId = *NeighbourCellParamList.paramarray[l][GNB_CONFIG_N_CELL_PHYSICAL_ID_IDX].uptr;
       neighbourCell->subcarrierSpacing = *NeighbourCellParamList.paramarray[l][GNB_CONFIG_N_CELL_SCS_IDX].uptr;
+      neighbourCell->band = *NeighbourCellParamList.paramarray[l][GNB_CONFIG_N_CELL_BAND_IDX].uptr;
       neighbourCell->absoluteFrequencySSB = *NeighbourCellParamList.paramarray[l][GNB_CONFIG_N_CELL_ABS_FREQ_SSB_IDX].i64ptr;
       neighbourCell->tac = *NeighbourCellParamList.paramarray[l][GNB_CONFIG_N_CELL_TAC_IDX].uptr;
 

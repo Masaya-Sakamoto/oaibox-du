@@ -585,6 +585,16 @@ nr_rrc_du_container_t *get_du_by_cell_id(gNB_RRC_INST *rrc, uint64_t cell_id)
   return NULL;
 }
 
+nr_rrc_du_container_t *get_du_by_pci(gNB_RRC_INST *rrc, uint16_t pci)
+{
+  nr_rrc_du_container_t *du = NULL;
+  RB_FOREACH(du, rrc_du_tree, &rrc->dus) {
+    if (pci == du->setup_req->cell[0].info.nr_pci)
+      return du;
+  }
+  return NULL;
+}
+
 void dump_du_info(const gNB_RRC_INST *rrc, FILE *f)
 {
   fprintf(f, "%ld connected DUs \n", rrc->num_dus);

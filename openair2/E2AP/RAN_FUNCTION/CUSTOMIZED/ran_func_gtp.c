@@ -27,11 +27,7 @@
 #include "openair2/LAYER2/NR_MAC_gNB/mac_proto.h"
 #include "openair2/E2AP/flexric/src/util/time_now_us.h"
 #include "openair2/LAYER2/nr_pdcp/nr_pdcp_oai_api.h"
-
-
-#if defined (NGRAN_GNB_CUCP)
 #include "openair2/RRC/NR/rrc_gNB_UE_context.h"
-#endif
 
 bool read_gtp_sm(void * data)
 {
@@ -53,13 +49,28 @@ bool read_gtp_sm(void * data)
   else {
     return false;
   }
-
-  #if defined (NGRAN_GNB_CUCP) && defined (NGRAN_GNB_CUUP)
-  if (RC.nrrrc[0]->node_type == ngran_gNB_DU || RC.nrrrc[0]->node_type == ngran_gNB_CUCP) return false;
+  if (RC.nrrrc[0]->node_type == ngran_gNB_DU || RC.nrrrc[0]->node_type == ngran_gNB_CUCP)
+    return false;
   assert((RC.nrrrc[0]->node_type == ngran_gNB_CU || RC.nrrrc[0]->node_type == ngran_gNB) && "Expected node types: CU or gNB-mono");
 
   for (size_t i = 0; i < num_ues; i++) {
-    rrc_gNB_ue_context_t *ue_context_p = rrc_gNB_get_ue_context(RC.nrrrc[0], ue_id_list[i]);
+    rrc_gNB_ue_context_t* ue_context_p = rrc_gNB_get_ue_context(RC.nrrrc[0], ue_id_list[i]);
+    if (ue_context_p) {
+        gtp->msg.ngut[i].ue_context_rnti_t = ue_context_p->ue_context.rnti;
+        gtp->msg.ngut[i].ue_context_amf_ue_ngap_id = ue_context_p->ue_context.amf_ue_ngap_id;
+        gtp->msg.ngut[i].ue_context_ho_elapsed_ms = ue_context_p->ue_context.ho_elapsed_ms;
+      if (ue_context_p->ue_context.measResults) {
+        gtp->msg.ngut[i].ue_context_mqr_rsrp = ue_context_p->ue_context.rsrp;
+        gtp->msg.ngut[i].ue_context_mqr_rsrq = ue_context_p->ue_context.rsrq;
+        gtp->msg.ngut[i].ue_context_mqr_sinr = ue_context_p->ue_context.sinr;
+
+        gtp->msg.ngut[i].ue_context_has_mqr = true;
+      } else {
+        gtp->msg.ngut[i].ue_context_mqr_rsrp = 0;
+        gtp->msg.ngut[i].ue_context_mqr_rsrq = 0;
+        gtp->msg.ngut[i].ue_context_mqr_sinr = 0;
+      }
+    }
 
     gtp->msg.ngut[i].rnti = ue_id_list[i];
     int nb_pdu_session = ue_context_p->ue_context.nb_of_pdusessions;
@@ -77,6 +88,7 @@ bool read_gtp_sm(void * data)
 
   return true;
 
+  #if defined (NGRAN_GNB_CUCP) && defined (NGRAN_GNB_CUUP)
   #elif defined (NGRAN_GNB_CUUP)
   // For the moment, CU-UP doesn't store PDU session information
   printf("GTP SM not yet implemented in CU-UP\n");

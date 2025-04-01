@@ -532,6 +532,8 @@ struct openair0_device_t {
    */
   int (*trx_read_func2)(openair0_device *device, openair0_timestamp *ptimestamp, uint32_t **buff, int nsamps);
 
+  int (*beam_switching)(int rx_beam_id, int tx_beam_id);
+
   /*! \brief print the device statistics
    * \param device the hardware to use
    * \returns  0 on success

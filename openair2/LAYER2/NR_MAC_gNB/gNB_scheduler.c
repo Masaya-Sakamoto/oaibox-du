@@ -174,6 +174,7 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   clear_beam_information(&gNB->beam_info, frame, slot, slots_frame);
 
   gNB->frame = frame;
+  gNB->slot = slot;
   start_meas(&gNB->eNB_scheduler);
   VCD_SIGNAL_DUMPER_DUMP_FUNCTION_BY_NAME(VCD_SIGNAL_DUMPER_FUNCTIONS_gNB_DLSCH_ULSCH_SCHEDULER,VCD_FUNCTION_IN);
 
@@ -209,6 +210,17 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
     dump_mac_stats(gNB, stats_output, sizeof(stats_output), true);
     LOG_I(NR_MAC, "Frame.Slot %d.%d\n%s\n", frame, slot, stats_output);
   }
+
+  // Check NSSAI
+#ifndef ENABLE_AERIAL
+  const int slot_ahead = RC.gNB[0]->if_inst->sl_ahead;
+  // Update downlink scheduling coefficients
+  nssai_config_t *nssai_config_dl = &gNB->nssai_config_dl;
+  get_nssai_sched_coeff(nssai_config_dl, frame, slot, slots_frame);
+  // Update uplink scheduling coefficients
+  nssai_config_t *nssai_config_ul = &gNB->nssai_config_ul;
+  get_nssai_sched_coeff(nssai_config_ul, frame, (slot + slots_frame - slot_ahead) % slots_frame, slots_frame);
+#endif
 
   nr_measgap_scheduling(gNB, frame, slot);
   nr_mac_update_timers(module_idP, frame, slot);

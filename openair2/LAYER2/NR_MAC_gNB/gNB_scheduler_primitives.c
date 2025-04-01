@@ -724,6 +724,55 @@ NR_pusch_dmrs_t get_ul_dmrs_params(const NR_ServingCellConfigCommon_t *scc,
   return dmrs;
 }
 
+void get_nssai_sched_coeff(nssai_config_t *nssai_config, frame_t frame, slot_t slot, int slots_per_frame)
+{
+  // Check NSSAI
+  for (int nssai_idx = 0; nssai_idx < 256; nssai_idx++) {
+    if (nssai_config->active[nssai_idx]) {
+      // Compute current bitrate for the slice
+      nssai_config->curr_bitrate[nssai_idx] = 0;
+      for (int sl = 0; sl < (2 * slots_per_frame); sl++) {
+        nssai_config->curr_bitrate[nssai_idx] += nssai_config->acc_bytes[nssai_idx][sl + slots_per_frame * (frame % 2)];
+      }
+      nssai_config->curr_bitrate[nssai_idx] = nssai_config->curr_bitrate[nssai_idx] * 8 * 50; // 8 bits/byte, 100/2 frames/second
+      nssai_config->acc_bytes[nssai_idx][slot + slots_per_frame * (frame % 2)] = 0;
+
+      float nssai_coeff = 1.0;
+      switch (nssai_idx) {
+        case 1: // eMBB
+          nssai_coeff = 1.0;
+          break;
+        case 2: // URLLC
+          nssai_coeff = 1000.0;
+          break;
+        case 3: // MIoT
+          nssai_coeff = 100.0;
+          break;
+        case 4: // V2X
+          nssai_coeff = 10.0;
+          break;
+        default:
+          AssertFatal(false, "SST %d not handled yet in MAC scheduler!\n", nssai_idx);
+          break;
+      }
+
+      if (nssai_config->curr_bitrate[nssai_idx] < nssai_config->agg_bitrate[nssai_idx]) {
+        nssai_config->coeff[nssai_idx] = nssai_coeff;
+      } else {
+        nssai_config->coeff[nssai_idx] = 1.0 / nssai_coeff;
+      }
+
+      if (slot == 0 && nssai_config->curr_bitrate[nssai_idx] > 0) {
+        LOG_D(NR_MAC,
+              "Adjusting priority due to NSSAI configuration, SST: %d, coeff %f, bitrate %f Mbps\n",
+              nssai_idx,
+              nssai_config->coeff[nssai_idx],
+              (float)nssai_config->curr_bitrate[nssai_idx] / 1e6);
+      }
+    }
+  }
+}
+
 #define BLER_UPDATE_FRAME 10
 #define BLER_FILTER 0.9f
 int get_mcs_from_bler(const NR_bler_options_t *bler_options,
@@ -2075,8 +2124,11 @@ NR_UE_info_t *find_nr_UE(NR_UEs_t *UEs, rnti_t rntiP)
 void delete_nr_ue_data(NR_UE_info_t *UE, NR_COMMON_channels_t *ccPtr, uid_allocator_t *uia)
 {
   ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->CellGroup);
+  UE->CellGroup = NULL;
   ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->reconfigCellGroup);
+  UE->reconfigCellGroup = NULL;
   ASN_STRUCT_FREE(asn_DEF_NR_UE_NR_Capability, UE->capability);
+  UE->capability = NULL;
   NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
   seq_arr_free(&sched_ctrl->lc_config, NULL);
   destroy_nr_list(&sched_ctrl->available_dl_harq);
@@ -3134,7 +3186,10 @@ static void nr_mac_apply_cellgroup(gNB_MAC_INST *mac, NR_UE_info_t *UE, frame_t 
   LOG_D(NR_MAC, "%4d.%2d RNTI %04x: UE inactivity timer expired\n", frame, slot, UE->rnti);
 
   /* check if there is a new CellGroupConfig to be applied */
-  if (UE->interrupt_action == FOLLOW_INSYNC_RECONFIG && UE->reconfigCellGroup != NULL) {
+  if (UE->interrupt_action == FOLLOW_INSYNC_RECONFIG && UE->reconfigCellGroup != NULL && UE->reconfigCellGroup == UE->CellGroup) {
+    UE->reconfigCellGroup = NULL;
+    UE->interrupt_action = FOLLOW_INSYNC;
+  } else if (UE->interrupt_action == FOLLOW_INSYNC_RECONFIG && UE->reconfigCellGroup != NULL) {
     LOG_D(NR_MAC, "%4d.%2d RNTI %04x: Apply CellGroupConfig after UE inactivity\n", frame, slot, UE->rnti);
     ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->CellGroup);
     UE->CellGroup = UE->reconfigCellGroup;
@@ -3416,6 +3471,9 @@ bool prepare_initial_ul_rrc_message(gNB_MAC_INST *mac, NR_UE_info_t *UE)
   int srb_id = 1;
   const NR_ServingCellConfigCommon_t *scc = mac->common_channels[CC_id].ServingCellConfigCommon;
   const NR_ServingCellConfig_t *sccd = mac->common_channels[CC_id].pre_ServingCellConfig;
+  if (UE->is_redcap) {
+    sccd = NULL;
+  }
   NR_CellGroupConfig_t *cellGroupConfig = get_initial_cellGroupConfig(UE->uid, scc, sccd, &mac->radio_config);
   ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->CellGroup);
   UE->CellGroup = cellGroupConfig;
@@ -3619,6 +3677,47 @@ bool nr_mac_get_new_rnti(NR_UEs_t *UEs, const NR_RA_t *ra_base, int ra_count, rn
     loop++;
   } while (loop < 100 && (exist_connected_ue || exist_in_pending_ra_ue));
   return loop < 100; // nothing found: loop count 100
+}
+
+void nr_bwp_switching(module_id_t module_id, int ue_id, int dl_bwp_id, int ul_bwp_id)
+{
+  gNB_MAC_INST *mac = RC.nrmac[module_id];
+  NR_SCHED_LOCK(&mac->sched_lock);
+
+  NR_UEs_t *UE_info = &mac->UE_info;
+
+  UE_iterator (UE_info->list, UE) {
+    if (du_exists_f1_ue_data(UE->rnti)) {
+      const f1_ue_data_t ued = du_get_f1_ue_data(UE->rnti);
+      if (ue_id == ued.secondary_ue) {
+        NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+
+        if (nr_timer_is_active(&sched_ctrl->transm_interrupt) || !UE->CellGroup || !UE->CellGroup->spCellConfig
+            || !UE->CellGroup->spCellConfig->spCellConfigDedicated
+            || !UE->CellGroup->spCellConfig->spCellConfigDedicated->downlinkBWP_ToAddModList
+            || !UE->CellGroup->spCellConfig->spCellConfigDedicated->uplinkConfig
+            || !UE->CellGroup->spCellConfig->spCellConfigDedicated->uplinkConfig->uplinkBWP_ToAddModList) {
+          break;
+        }
+
+        if (!nr_timer_is_active(&sched_ctrl->transm_interrupt)) {
+          *UE->CellGroup->spCellConfig->spCellConfigDedicated->firstActiveDownlinkBWP_Id = dl_bwp_id;
+          *UE->CellGroup->spCellConfig->spCellConfigDedicated->defaultDownlinkBWP_Id = dl_bwp_id;
+          *UE->CellGroup->spCellConfig->spCellConfigDedicated->uplinkConfig->firstActiveUplinkBWP_Id = ul_bwp_id;
+
+          //  Trigger RRC Reconfiguration
+          LOG_I(NR_MAC, "BWP switching for UE 0x%04x, triggering RRC Reconfiguration\n", UE->rnti);
+          nr_mac_trigger_reconfiguration(mac, UE);
+          UE->reconfigCellGroup = UE->CellGroup;
+
+          int delay = nr_mac_get_reconfig_delay_slots(UE->current_DL_BWP.scs);
+          interrupt_followup_action_t action = UE->reconfigCellGroup ? FOLLOW_INSYNC_RECONFIG : FOLLOW_INSYNC;
+          nr_mac_interrupt_ue_transmission(mac, UE, action, delay);
+        }
+      }
+    }
+  }
+  NR_SCHED_UNLOCK(&mac->sched_lock);
 }
 
 /// @brief Orders PDCCH aggregation levels so that we first check desired aggregation level according to

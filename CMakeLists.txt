@@ -288,11 +288,11 @@ add_definitions(-DHAVE_NETINET_IN_H)
 set(E2_AGENT "OFF" CACHE STRING "O-RAN-compliant E2 Agent")
 set_property(CACHE E2_AGENT PROPERTY STRINGS "ON" "OFF")
 
-set(E2AP_VERSION "E2AP_V2" CACHE STRING "E2AP version")
+set(E2AP_VERSION "E2AP_V3" CACHE STRING "E2AP version")
 set_property(CACHE E2AP_VERSION PROPERTY STRINGS "E2AP_V1" "E2AP_V2" "E2AP_V3")
 message(STATUS "Selected E2AP_VERSION: ${E2AP_VERSION}")
 
-set(KPM_VERSION "KPM_V2_03" CACHE STRING "The KPM SM version to use")
+set(KPM_VERSION "KPM_V3_00" CACHE STRING "The KPM SM version to use")
 set_property(CACHE KPM_VERSION PROPERTY STRINGS "KPM_V2_03" "KPM_V3_00")
 message(STATUS "Selected KPM Version: ${KPM_VERSION}")
 
@@ -1837,6 +1837,7 @@ add_executable(nr-softmodem
   ${OPENAIR_DIR}/common/utils/lte/prach_utils.c
   ${PHY_INTERFACE_DIR}/queue_t.c
   ${OPENAIR1_DIR}/PHY/TOOLS/phy_scope_interface.c
+  ${OPENAIR_DIR}/executables/oaibox_data_export.c
   )
 
 target_link_libraries(nr-softmodem PRIVATE

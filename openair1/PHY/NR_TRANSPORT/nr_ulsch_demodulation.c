@@ -1170,6 +1170,11 @@ static void nr_pusch_symbol_processing(void *arg)
   int ulsch_id = rdata->ulsch_id;
   int slot = rdata->slot;
   NR_gNB_PUSCH *pusch_vars = &gNB->pusch_vars[ulsch_id];
+  if (IS_SOFTMODEM_EXPORT_MOD_SYMBOLS_ENABLED) {
+    pusch_vars->start_symbol = rdata->startSymbol;
+    pusch_vars->num_symbols = rdata->numSymbols;
+    pusch_vars->rb_size = rel15_ul->rb_size;
+  }
   for (int symbol = rdata->startSymbol; symbol < rdata->startSymbol + rdata->numSymbols; symbol++) {
     if (gNB->pusch_vars[ulsch_id].ul_valid_re_per_slot[symbol] == 0) 
       continue;

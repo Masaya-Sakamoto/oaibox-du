@@ -169,7 +169,7 @@ static void  sl_prepare_phy_config(int module_id,
 
   if (pointA_ARFCN < 600000)
     scs_scaling = scs_scaling*3;
-  if (pointA_ARFCN > 2016666)
+  if (get_freq_range_from_arfcn(pointA_ARFCN) == FR2)
     scs_scaling = scs_scaling>>2;
   //SSB arfcn points to middle RE of PSBCH 11 RBs
   uint32_t diff = (SSB_ARFCN - 66*scs_scaling) - pointA_ARFCN;

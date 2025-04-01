@@ -696,6 +696,16 @@ static void pf_dl(module_id_t module_id,
                                     0 /* tb_scaling */,
                                     sched_pdsch->nrOfLayers) >> 3;
       float coeff_ue = (float) tbs / UE->dl_thr_ue;
+
+      // Apply NSSAI specific scheduling coefficients
+      nssai_config_t *nssai_config = &mac->nssai_config_dl;
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        if (nssai_config->active[c->nssai.sst]) {
+          coeff_ue = coeff_ue * nssai_config->coeff[c->nssai.sst];
+        }
+      }
+
       LOG_D(NR_MAC, "[UE %04x][%4d.%2d] b %d, thr_ue %f, tbs %d, coeff_ue %f\n",
             UE->rnti,
             frame,
@@ -1333,6 +1343,13 @@ void nr_schedule_ue_spec(module_id_t module_id,
             dlsch_total_bytes += len;
             lcid_bytes += len;
             sdus += 1;
+          }
+
+          // Add bytes to the corresponding NSSAI config structure
+          nssai_config_t *nssai_config_dl = &gNB_mac->nssai_config_dl;
+          if (nssai_config_dl->active[c->nssai.sst]) {
+            const int8_t slots_per_frame = gNB_mac->frame_structure.numb_slots_frame;
+            nssai_config_dl->acc_bytes[c->nssai.sst][slot + slots_per_frame * (frame % 2)] += lcid_bytes;
           }
 
           UE->mac_stats.dl.lc_bytes[lcid] += lcid_bytes;

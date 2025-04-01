@@ -1,0 +1,101 @@
+services:
+  nv-cubb:
+    container_name: nv-cubb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+    network_mode: host
+    shm_size: 4096m
+    privileged: true
+    stdin_open: true
+    tty: true
+    volumes:
+      - /lib/modules:/lib/modules
+      - /dev/hugepages:/dev/hugepages
+      - /usr/src:/usr/src
+      - ./aerial_l1_entrypoint.sh:/opt/nvidia/cuBB/aerial_l1_entrypoint.sh
+      - ./l1_config.yaml:/opt/nvidia/cuBB/l1_config.yaml
+      #- ./nvlog_config.yaml:/opt/nvidia/cuBB/cuPHY/nvlog/config/nvlog_config.yaml
+      - /var/log/aerial:/var/log/aerial
+      - ../../../cmake_targets/share:/opt/cuBB/share
+    userns_mode: host
+    ipc: "host"
+    image: cubb-build:24-3
+    environment:
+      - cuBB_SDK=/opt/nvidia/cuBB
+    #    command: bash -c "sleep infinity"
+    command: bash -c "sudo rm -rf /tmp/phy.log && chmod +x /opt/nvidia/cuBB/aerial_l1_entrypoint.sh && /opt/nvidia/cuBB/aerial_l1_entrypoint.sh  && sudo /opt/nvidia/cuBB/build/cuPHY-CP/gt_common_libs/nvIPC/tests/pcap/pcap_collect" || bash -c "sudo /opt/nvidia/cuBB/build/cuPHY-CP/gt_common_libs/nvIPC/tests/pcap/pcap_collect"
+    healthcheck:
+      test: ["CMD-SHELL",'grep -q "L1 is ready!" /tmp/phy.log && echo 0 || echo 1']
+      interval: 15s
+      timeout: 10s
+      retries: 10
+  flexric:
+    image: flexric:latest
+    network_mode: host
+    container_name: flexric
+    healthcheck:
+      test: /bin/bash -c "ps aux | grep -v grep | grep -c nearRT-RIC"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      - NEAR_RIC_IP=127.0.0.1
+      - RIC_CLIENT_IP=127.0.0.1
+      - E2_XAPP_UE_MEASUREMENT_IP=127.0.0.1
+  ue_measurement_xapp:
+    image: oaibox.xapp_e2_measurements:latest
+    profiles:
+      - xapp
+    network_mode: host
+    container_name: ue_measurements_xapp
+    depends_on:
+      - flexric
+    environment:
+      - NEAR_RIC_IP=127.0.0.1
+      - RIC_CLIENT_IP=127.0.0.1
+      - E2_XAPP_UE_MEASUREMENT_IP=127.0.0.1
+  oai-gnb-aerial:
+    #    command: bash -c "sleep infinity"
+    #cpuset: "11-20"
+    image: e2-oai-gnb-aerial:latest
+    depends_on:
+      nv-cubb:
+        condition: service_healthy
+      flexric:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_NICE
+      - IPC_LOCK
+    ipc: "container:nv-cubb"
+    environment:
+      - USE_ADDITIONAL_OPTIONS= --log_config.global_log_options level,nocolor,time
+    command: bash -c "chrt -r 1 taskset -c 12-17 chrt -f 95 gdb -ex run --args /opt/oai-gnb/bin/nr-softmodem $USE_ADDITIONAL_OPTIONS -O /opt/oai-gnb/etc/gnb.conf --MACRLCs.[0].tr_s_poll_core 17  | ts  %.s | tee /var/log/aerial/oai.log"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+    network_mode: host
+    shm_size: 4096m
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../../conf_files/gnb-vnf.sa.band78.273prb.aerial.conf:/opt/oai-gnb/etc/gnb.conf
+      - /home/aerial/.gdbinit:/root/.gdbinit
+    container_name: oai-gnb-aerial
+    healthcheck:
+      test: /bin/bash -c "ps aux | grep -v grep | grep -c softmodem"
+      interval: 10s
+      timeout: 5s
+      retries: 5

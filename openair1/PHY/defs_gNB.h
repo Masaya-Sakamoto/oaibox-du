@@ -335,6 +335,9 @@ typedef struct {
   int llr_offset[14];
   /// flag to indicate DTX on reception
   int DTX;
+  int start_symbol;
+  int num_symbols;
+  int rb_size;
 } NR_gNB_PUSCH;
 
 /// Context data structure for RX/TX portion of slot processing
@@ -380,6 +383,8 @@ typedef struct gNB_L1_proc_t_s {
   /// set of scheduling variables RXn-TXnp4 threads
   gNB_L1_rxtx_proc_t L1_proc;
   gNB_L1_rxtx_proc_t L1_proc_tx;
+  /// pthread structure for dumping gNB stats
+  pthread_t oaibox_data_export_thread;
 } gNB_L1_proc_t;
 
 typedef struct {
@@ -554,6 +559,8 @@ typedef struct PHY_VARS_gNB_s {
   int L1_tx_thread_core;
   struct processingData_L1tx *msgDataTx;
   void *scopeData;
+  uint32_t segments_count;
+  uint32_t ldpc_iterations_count;
 } PHY_VARS_gNB;
 
 struct puschSymbolReqId {

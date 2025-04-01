@@ -923,7 +923,7 @@ void rrc_gNB_process_NGAP_PDUSESSION_SETUP_REQ(MessageDef *msg_p, instance_t ins
    * maximum number is capped on a per-UE basis as indicated in variable
    * max_delays_pdu_session. */
   if (UE->ongoing_pdusession_setup_request == false) {
-    UE->max_delays_pdu_session = 20;
+    UE->max_delays_pdu_session = 100;
   }
   if (UE->max_delays_pdu_session > 0 && (transaction_ongoing(UE) || UE->ongoing_pdusession_setup_request == true)) {
     int wait_us = 10000;

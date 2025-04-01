@@ -41,6 +41,7 @@ struct nr_rrc_du_container_t *get_du_for_ue(struct gNB_RRC_INST_s *rrc, uint32_t
 struct nr_rrc_du_container_t *get_du_by_assoc_id(struct gNB_RRC_INST_s *rrc, sctp_assoc_t assoc_id);
 const struct f1ap_served_cell_info_t *get_cell_information_by_phycellId(int phyCellId);
 struct nr_rrc_du_container_t *get_du_by_cell_id(struct gNB_RRC_INST_s *rrc, uint64_t cell_id);
+struct nr_rrc_du_container_t *get_du_by_pci(struct gNB_RRC_INST_s *rrc, uint16_t pci);
 
 void dump_du_info(const struct gNB_RRC_INST_s *rrc, FILE *f);
 

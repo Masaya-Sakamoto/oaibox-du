@@ -351,6 +351,7 @@ static int nr_process_mac_pdu(instance_t module_idP,
 
         if (lcid == UL_SCH_LCID_CCCH_48_BITS_REDCAP) {
           LOG_I(MAC, "UE with RNTI %04x is RedCap\n", UE->rnti);
+          UE->is_redcap = true;
         }
 
         if (prepare_initial_ul_rrc_message(RC.nrmac[module_idP], UE)) {
@@ -406,6 +407,21 @@ static int nr_process_mac_pdu(instance_t module_idP,
               module_idP,
               mac_len);
         UE->mac_stats.ul.lc_bytes[lcid] += mac_len;
+
+        // Check NSSAI
+        for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+          const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+          if (c->lcid == lcid) {
+            gNB_MAC_INST *nr_mac = RC.nrmac[0];
+            // Add bytes to the corresponding NSSAI config structure
+            nssai_config_t *nssai_config_ul = &nr_mac->nssai_config_ul;
+            if (nssai_config_ul->active[c->nssai.sst]) {
+              const int8_t slots_frame = nr_mac->frame_structure.numb_slots_frame;
+              nssai_config_ul->acc_bytes[c->nssai.sst][slot + slots_frame * (frameP % 2)] += mac_len;
+            }
+            break;
+          }
+        }
 
         mac_rlc_data_ind(module_idP,
                          UE->rnti,
@@ -834,7 +850,7 @@ static void _nr_rx_sdu(const module_id_t gnb_mod_idP,
     T(T_GNB_MAC_UL_PDU_WITH_DATA, T_INT(gnb_mod_idP), T_INT(CC_idP),
       T_INT(rntiP), T_INT(frameP), T_INT(slotP), T_INT(-1) /* harq_pid */,
       T_BUFFER(sduP, sdu_lenP));
-    
+
     /* we don't know this UE (yet). Check whether there is a ongoing RA (Msg 3)
      * and check the corresponding UE's RNTI match, in which case we activate
      * it. */
@@ -1996,13 +2012,24 @@ static void pf_ul(module_id_t module_id,
       continue;
     }
 
+    uint32_t ulsch_max_frame_inactivity = nrmac->ulsch_max_frame_inactivity;
+    // Apply NSSAI specific scheduling coefficients, set ulsch_max_frame_inactivity to 0 for URLLC slice
+    nssai_config_t *nssai_config = &nrmac->nssai_config_ul;
+    for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+      const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+      if (c->nssai.sst == 2 && nssai_config->active[c->nssai.sst]) {
+        ulsch_max_frame_inactivity = 0;
+        break;
+      }
+    }
+
     const int B = max(0, sched_ctrl->estimated_ul_buffer - sched_ctrl->sched_ul_bytes);
     /* preprocessor computed sched_frame/sched_slot */
     const bool do_sched = nr_UE_is_to_be_scheduled(&nrmac->frame_structure,
                                                    UE,
                                                    sched_frame,
                                                    sched_slot,
-                                                   nrmac->ulsch_max_frame_inactivity);
+                                                   ulsch_max_frame_inactivity);
 
     LOG_D(NR_MAC,"pf_ul: do_sched UE %04x => %s\n", UE->rnti, do_sched ? "yes" : "no");
     if ((B == 0 && !do_sched) || nr_timer_is_active(&sched_ctrl->transm_interrupt)) {
@@ -2127,6 +2154,15 @@ static void pf_ul(module_id_t module_id,
     /* Calculate coefficient*/
     const uint32_t tbs = ul_pf_tbs[current_BWP->mcs_table][sched_pusch->mcs];
     float coeff_ue = (float) tbs / UE->ul_thr_ue;
+
+    // Apply NSSAI specific scheduling coefficients
+    for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+      const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+      if (nssai_config->active[c->nssai.sst]) {
+        coeff_ue = coeff_ue * nssai_config->coeff[c->nssai.sst];
+      }
+    }
+
     LOG_D(NR_MAC, "[UE %04x][%4d.%2d] b %d, ul_thr_ue %f, tbs %d, coeff_ue %f\n",
           UE->rnti,
           frame,

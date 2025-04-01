@@ -277,6 +277,7 @@ typedef struct {
   NR_BCCH_BCH_Message_t *mib;
   NR_BCCH_DL_SCH_Message_t *sib1;
   NR_BCCH_DL_SCH_Message_t *sib19;
+  NR_SIB1_v1700_IEs_t *sib1_v1700_ies;
   NR_ServingCellConfigCommon_t *ServingCellConfigCommon;
   /// pre-configured ServingCellConfig that is default for every UE
   NR_ServingCellConfig_t *pre_ServingCellConfig;
@@ -785,6 +786,7 @@ typedef struct {
   float ul_thr_ue;
   float dl_thr_ue;
   long pdsch_HARQ_ACK_Codebook;
+  bool is_redcap;
 } NR_UE_info_t;
 
 typedef struct {
@@ -825,6 +827,14 @@ typedef struct {
   uint64_t total_prb_aggregate;
   uint64_t used_prb_aggregate;
 } mac_stats_t;
+
+typedef struct nssai_config_t {
+  bool active[256];
+  float coeff[256];
+  uint64_t agg_bitrate[256]; // Aggregated bitrate in bits per second
+  uint64_t curr_bitrate[256]; // Current bitrate in bits per second
+  uint64_t acc_bytes[256][160]; // Accumulated bytes in a 2 frames window
+} nssai_config_t;
 
 /*! \brief top level eNB MAC structure */
 typedef struct gNB_MAC_INST_s {
@@ -946,6 +956,9 @@ typedef struct gNB_MAC_INST_s {
   nr_mac_rrc_ul_if_t mac_rrc;
   f1_config_t f1_config;
   int16_t frame;
+  int16_t slot;
+  nssai_config_t nssai_config_dl;
+  nssai_config_t nssai_config_ul;
 
   pthread_mutex_t sched_lock;
 

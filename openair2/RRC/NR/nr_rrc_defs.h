@@ -259,6 +259,11 @@ typedef struct gNB_RRC_UE_s {
   int max_delays_pdu_session;
   bool ongoing_pdusession_setup_request;
 
+  long rsrp;
+  double rsrq;
+  double sinr;
+  double ho_elapsed_ms;
+
 } gNB_RRC_UE_t;
 
 typedef struct rrc_gNB_ue_context_s {
@@ -321,6 +326,7 @@ typedef struct {
   int physicalCellId;
   int absoluteFrequencySSB;
   int subcarrierSpacing;
+  int band;
   plmn_identity_t plmn;
   uint32_t tac;
   bool isIntraFrequencyNeighbour;
@@ -350,6 +356,11 @@ typedef struct cucp_cuup_if_s {
   cucp_cuup_bearer_context_mod_func_t bearer_context_mod;
   cucp_cuup_bearer_context_release_func_t bearer_context_release;
 } cucp_cuup_if_t;
+
+typedef void (*trigger_f1_ho_func_t)(struct gNB_RRC_INST_s *rrc, int ue_id, int target_cellid);
+typedef struct xapp_s {
+  trigger_f1_ho_func_t trigger_f1_ho;
+} xapp_t;
 
 typedef struct nr_rrc_du_container_t {
   /* Tree-related data */
@@ -397,6 +408,7 @@ typedef struct gNB_RRC_INST_s {
 
   nr_mac_rrc_dl_if_t mac_rrc;
   cucp_cuup_if_t cucp_cuup;
+  xapp_t xapp;
   seq_arr_t *neighbour_cell_configuration;
   nr_measurement_configuration_t measurementConfiguration;
 

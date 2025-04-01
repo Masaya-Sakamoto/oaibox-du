@@ -198,7 +198,7 @@ int DU_handle_UE_CONTEXT_SETUP_REQUEST(instance_t instance, sctp_assoc_t assoc_i
         switch (cu2du_info->id) {
           case F1AP_ProtocolIE_ID_id_HandoverPreparationInformation:
             DevAssert(cu2du_info->extensionValue.present == F1AP_CUtoDURRCInformation_ExtIEs__extensionValue_PR_HandoverPreparationInformation);
-            const F1AP_HandoverPreparationInformation_t *hopi = &cu2du_info->extensionValue.choice.MeasurementTimingConfiguration;
+            const F1AP_HandoverPreparationInformation_t *hopi = &cu2du_info->extensionValue.choice.HandoverPreparationInformation;
             cu2du->handoverPreparationInfo = calloc_or_fail(1, hopi->size);
             memcpy(cu2du->handoverPreparationInfo, hopi->buf, hopi->size);
             cu2du->handoverPreparationInfo_length = hopi->size;

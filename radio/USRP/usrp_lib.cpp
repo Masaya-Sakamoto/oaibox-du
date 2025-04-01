@@ -310,6 +310,18 @@ static void trx_usrp_start_generic_gpio(openair0_device *device, usrp_state_t *s
   s->usrp->set_gpio_attr(s->gpio_bank, "OUT", MAN_MASK, 0xfff);
 }
 
+static int beam_switching(int rx_beam_id, int tx_beam_id)
+{
+#ifdef ENABLE_TMYTEK_UD_BBOX
+  LOG_I(PHY, "TMYTEK: selecting rx beam id: %d and tx beam id: %d\n", rx_beam_id, tx_beam_id);
+  usrp_select_beam_id(MODE_RX, rx_beam_id);
+  usrp_select_beam_id(MODE_TX, tx_beam_id);
+#else
+  LOG_E(PHY, "No support for TMYTEK UD BBOX beam switching\n");
+#endif
+  return 0;
+}
+
 /*! \brief Called to start the USRP transceiver. Return 0 if OK, < 0 if error
     @param device pointer to the device structure specific to the RF hardware target
 */
@@ -1075,6 +1087,74 @@ static void usrp_sync_pps(usrp_state_t *s)
   LOG_I(HW, "USRP clock set to %f sec\n", tai_sec);
 }
 
+int get_tx_sample_advance(dev_type_t device_type, int sampling_rate)
+{
+  switch (device_type) {
+    case USRP_B200_DEV:
+      switch (sampling_rate) {
+        case 46080000: // 40 MHz 3/4 sampling rate
+          return 164;
+        case 30720000: // 20 MHz
+          return 186;
+        case 23040000: // 20 MHz SCS 3/4 sampling rate
+          return 172;
+        case 11520000: // 10 MHz 3/4 sampling rate
+          return 172;
+        default:
+          return -1;
+      }
+      break;
+
+    case USRP_N300_DEV:
+      switch (sampling_rate) {
+        case 122880000: // 100/80 MHz 30 kHz SCS
+          return 200;
+        case 61440000: // 60/40 MHz 30 kHz SCS
+          return 120;
+        case 30720000: // 20 MHz 30 kHz SCS
+          return 88;
+        default:
+          return -1;
+      }
+      break;
+
+    case USRP_X300_DEV:
+      switch (sampling_rate) {
+        case 184320000: // 100 MHz 30 kHz SCS
+          return 0;
+        case 92160000: // 60/80 MHz 30 kHz SCS
+          return 20;
+        case 46080000: // 40 MHz 30 kHz SCS
+          return 70;
+        case 23040000: // 20 MHz 30 kHz SCS
+          return 56;
+        default:
+          return -1;
+      }
+      break;
+
+    case USRP_X400_DEV:
+      switch (sampling_rate) {
+        case 245760000: // 200 MHz 120 kHz SCS
+          return 230;
+        case 122880000: // 100/80 MHz 30 kHz SCS
+          return 160;
+        case 61440000: // 60/40 MHz 30 kHz SCS
+          return 100;
+        case 30720000: // 20 MHz 30 kHz SCS
+          return 90;
+        default:
+          return -1;
+      }
+      break;
+
+    default:
+      return -1;
+  }
+
+  return -1;
+}
+
 extern "C" {
   int device_init(openair0_device *device, openair0_config_t *openair0_cfg) {
     LOG_I(HW, "openair0_cfg[0].sdr_addrs == '%s'\n", openair0_cfg[0].sdr_addrs);
@@ -1100,6 +1180,7 @@ extern "C" {
     device->trx_set_freq_func = trx_usrp_set_freq;
     device->trx_set_gains_func   = trx_usrp_set_gains;
     device->trx_write_init = trx_usrp_write_init;
+    device->beam_switching = beam_switching;
 
 
     // hotfix! to be checked later
@@ -1421,6 +1502,14 @@ extern "C" {
         openair0_cfg[0].rx_bw                 = 20e6;
         break;
 
+      case 11520000:
+        s->usrp->set_master_clock_rate(11.52e06);
+        //openair0_cfg[0].samples_per_packet    = 1024;
+        openair0_cfg[0].tx_sample_advance     = 103;
+        openair0_cfg[0].tx_bw                 = 10e6;
+        openair0_cfg[0].rx_bw                 = 10e6;
+        break;
+
       case 7680000:
         s->usrp->set_master_clock_rate(30.72e6);
         //openair0_cfg[0].samples_per_packet    = 1024;
@@ -1442,6 +1531,14 @@ extern "C" {
         exit(-1);
         break;
     }
+  }
+
+  int tx_sample_advance = get_tx_sample_advance(device->type, (int)openair0_cfg[0].sample_rate);
+  if (tx_sample_advance >= 0) {
+    openair0_cfg[0].tx_sample_advance = tx_sample_advance;
+    LOG_I(HW, "Applying USRP tx_sample_advance: %d\n", tx_sample_advance);
+  } else {
+    LOG_W(HW, "A calibration for USRP tx_sample_advance may be required! Applying default tx_sample_advance: %d\n", openair0_cfg[0].tx_sample_advance);
   }
 
   /* device specific */
@@ -1469,6 +1566,10 @@ extern "C" {
       uhd::tune_request_t rx_tune_req(cfg->rx_freq[i], cfg->tune_offset);
       s->usrp->set_rx_freq(rx_tune_req, i+choffset);
       set_rx_gain_offset(cfg, i, bw_gain_adjust);
+      // Reset any rx_gain_offset
+      for (int chain_index = 0; chain_index < 4; chain_index++) {
+        openair0_cfg[0].rx_gain_offset[chain_index] = 0.0;
+      }
       ::uhd::gain_range_t gain_range = s->usrp->get_rx_gain_range(i+choffset);
       // limit to maximum gain
       double gain = cfg->rx_gain[i] - cfg->rx_gain_offset[i];

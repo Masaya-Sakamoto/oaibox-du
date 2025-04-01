@@ -84,7 +84,7 @@ void set_default_drb_pdcp_config(struct pdcp_config_s *pdcp_config, int do_drb_i
   pdcp_config->discardTimer = NR_PDCP_Config__drb__discardTimer_infinity;
   pdcp_config->pdcp_SN_SizeDL = NR_PDCP_Config__drb__pdcp_SN_SizeDL_len18bits;
   pdcp_config->pdcp_SN_SizeUL = NR_PDCP_Config__drb__pdcp_SN_SizeUL_len18bits;
-  pdcp_config->t_Reordering = NR_PDCP_Config__t_Reordering_ms100;
+  pdcp_config->t_Reordering = NR_PDCP_Config__t_Reordering_ms1000;
   pdcp_config->headerCompression.present = NR_PDCP_Config__drb__headerCompression_PR_notUsed;
   pdcp_config->headerCompression.NotUsed = 0;
   pdcp_config->integrityProtection = do_drb_integrity ? NR_PDCP_Config__drb__integrityProtection_enabled : 1;
