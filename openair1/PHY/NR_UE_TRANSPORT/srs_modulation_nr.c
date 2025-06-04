@@ -366,10 +366,10 @@ int generate_srs_nr(nfapi_nr_srs_pdu_t *srs_config_pdu,
 #endif
 
       uint16_t subcarrier = subcarrier_offset + k_0_p;
-      if (subcarrier>frame_parms->ofdm_symbol_size) {
+      if (subcarrier >= frame_parms->ofdm_symbol_size) {
         subcarrier -= frame_parms->ofdm_symbol_size;
       }
-      uint16_t l_line_offset = l_line*frame_parms->ofdm_symbol_size;
+      uint16_t l_line_offset = l_line * frame_parms->ofdm_symbol_size;
 
       // For each port, and for each OFDM symbol, here it is computed and mapped an SRS sequence with M_sc_b_SRS symbols
       for (int k = 0; k < M_sc_b_SRS; k++) {
@@ -399,7 +399,7 @@ int generate_srs_nr(nfapi_nr_srs_pdu_t *srs_config_pdu,
         // Subcarrier increment
         subcarrier += K_TC;
         if (subcarrier >= frame_parms->ofdm_symbol_size) {
-          subcarrier=subcarrier-frame_parms->ofdm_symbol_size;
+          subcarrier -= frame_parms->ofdm_symbol_size;
         }
 
       } // for (int k = 0; k < M_sc_b_SRS; k++)
