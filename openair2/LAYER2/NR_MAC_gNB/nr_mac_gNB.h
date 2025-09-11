@@ -180,7 +180,6 @@ typedef struct {
 } nr_bwp_config_t;
 
 typedef struct nr_mac_config_t {
-  int sib1_tda;
   nr_pdsch_AntennaPorts_t pdsch_AntennaPorts;
   int pusch_AntennaPorts;
   int minRXTXTIME;
