@@ -85,6 +85,12 @@ int beam_index_allocation(bool das,
   return idx;
 }
 
+// For now, there is only one option, but a parameter must be added that chooses a set of weights between different options.
+static c16_t *get_prec_weights(NR_DL_FRAME_PARMS *fp)
+{
+  return fp->prec_weights;
+}
+
 void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, nfapi_nr_dl_tti_ssb_pdu ssb_pdu)
 {
   NR_DL_FRAME_PARMS *fp = &gNB->frame_parms;
@@ -148,20 +154,23 @@ void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, nfapi_n
                                       slot,
                                       fp->symbols_per_slot,
                                       bitmap);
+  c16_t *w = get_prec_weights(fp);
 
-  nr_generate_pss(&txdataF[beam_nb][0][txdataF_offset], gNB->TX_AMP, ssb_start_symbol, cfg, fp);
-  nr_generate_sss(&txdataF[beam_nb][0][txdataF_offset], gNB->TX_AMP, ssb_start_symbol, cfg, fp);
+  nr_generate_pss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP, ssb_start_symbol, cfg, fp, w);
+  nr_generate_sss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP, ssb_start_symbol, cfg, fp, w);
 
   uint16_t slots_per_hf = (fp->slots_per_frame) >> 1;
   int n_hf = slot < slots_per_hf ? 0 : 1;
 
   int hf = fp->Lmax == 4 ? n_hf : 0;
   nr_generate_pbch_dmrs(nr_gold_pbch(fp->Lmax, gNB->gNB_config.cell_config.phy_cell_id.value, hf, ssb_index & 7),
-                        &txdataF[beam_nb][0][txdataF_offset],
+                        txdataF[beam_nb],
+                        txdataF_offset,
                         gNB->TX_AMP,
                         ssb_start_symbol,
                         cfg,
-                        fp);
+                        fp,
+                        w);
 
 #if T_TRACER
   if (T_ACTIVE(T_GNB_PHY_MIB)) {
@@ -173,14 +182,7 @@ void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, nfapi_n
   }
 #endif
 
-  nr_generate_pbch(gNB,
-                   &ssb_pdu,
-                   &txdataF[beam_nb][0][txdataF_offset],
-                   ssb_start_symbol,
-                   n_hf,
-                   frame,
-                   cfg,
-                   fp);
+  nr_generate_pbch(gNB, &ssb_pdu, txdataF[beam_nb], txdataF_offset, ssb_start_symbol, n_hf, frame, cfg, fp, w);
 }
 
 // clearing beam information to be provided to RU for all slots (DL and UL)
@@ -935,7 +937,8 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx, N
         pusch_vars->ulsch_noise_power[aarx] /= num_dmrs;
         pusch_vars->ulsch_noise_power_tot += pusch_vars->ulsch_noise_power[aarx];
       }
-      if (dB_fixed_x10(pusch_vars->ulsch_power_tot) < dB_fixed_x10(pusch_vars->ulsch_noise_power_tot) + gNB->pusch_thres) {
+      gNB->measurements.n0_power_tot_dB = dB_fixed(pusch_vars->ulsch_noise_power_tot);
+      if (dB_fixed_x10(pusch_vars->ulsch_power_tot) < 10 * gNB->measurements.n0_power_tot_dB + gNB->pusch_thres) {
         NR_gNB_PHY_STATS_t *stats = get_phy_stats(gNB, ulsch->rnti);
 
         LOG_D(PHY,
@@ -943,7 +946,7 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx, N
               frame_rx,
               slot_rx,
               dB_fixed_x10(pusch_vars->ulsch_power_tot),
-              dB_fixed_x10(pusch_vars->ulsch_noise_power_tot),
+              10 * gNB->measurements.n0_power_tot_dB,
               gNB->pusch_thres);
         pusch_vars->ulsch_power_tot = pusch_vars->ulsch_noise_power_tot;
         pusch_vars->DTX = 1;
@@ -965,7 +968,7 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx, N
               frame_rx,
               slot_rx,
               dB_fixed_x10(pusch_vars->ulsch_power_tot),
-              dB_fixed_x10(pusch_vars->ulsch_noise_power_tot),
+              10 * gNB->measurements.n0_power_tot_dB,
               gNB->pusch_thres);
 
         pusch_vars->DTX = 0;

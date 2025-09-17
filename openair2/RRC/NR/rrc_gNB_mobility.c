@@ -143,6 +143,8 @@ static void nr_initiate_handover(const gNB_RRC_INST *rrc,
   // otherwise only for the target DU (N2, Xn)
   ho_ctx_type_t ctx_type = source_du != NULL ? HO_CTX_BOTH : HO_CTX_TARGET;
   nr_handover_context_t *ho_ctx = alloc_ho_ctx(ctx_type);
+  clock_gettime(CLOCK_REALTIME, &ho_ctx->ho_start_ts);
+
   ho_ctx->target->du = target_du;
   // we will know target->{du_ue_id,new_rnti} once we have UE ctxt setup
   // response
@@ -383,4 +385,33 @@ void nr_HO_F1_trigger_telnet(gNB_RRC_INST *rrc, uint32_t rrc_ue_id)
   }
 
   nr_rrc_trigger_f1_ho(rrc, ue, source_du, target_du);
+}
+
+static void xapp_trigger_f1_ho(gNB_RRC_INST *rrc, int ue_id, int target_cellid)
+{
+  rrc_gNB_ue_context_t *ue_context_p = rrc_gNB_get_ue_context_by_amf_ue_ngap_id(rrc, ue_id);
+  if (ue_context_p == NULL) {
+    LOG_E(NR_RRC, "Cannot find UE context for amf_ue_ngap_id %d\n", ue_id);
+    return;
+  }
+  gNB_RRC_UE_t *ue = &ue_context_p->ue_context;
+
+  nr_rrc_du_container_t *source_du = get_du_for_ue(rrc, ue->rrc_ue_id);
+  if (!source_du) {
+    LOG_E(NR_RRC, "Source gNB-DU with ue_id %i was not found!\n", ue->rrc_ue_id);
+    return;
+  }
+
+  nr_rrc_du_container_t *target_du = get_du_by_pci(rrc, target_cellid);
+  if (!target_du) {
+    LOG_E(NR_RRC, "Target gNB-DU for target primary cell ID %i was not found!\n", target_cellid);
+    return;
+  }
+
+  nr_rrc_trigger_f1_ho(rrc, &ue_context_p->ue_context, source_du, target_du);
+}
+
+void xapp_rrc_init(xapp_t *xapp)
+{
+  xapp->trigger_f1_ho = xapp_trigger_f1_ho;
 }

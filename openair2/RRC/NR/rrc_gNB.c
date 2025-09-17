@@ -251,6 +251,7 @@ static void rrc_gNB_CU_DU_init(gNB_RRC_INST *rrc)
     case ngran_gNB_CU:
       mac_rrc_dl_f1ap_init(&rrc->mac_rrc);
       cucp_cuup_message_transfer_direct_init(rrc);
+      xapp_rrc_init(&rrc->xapp);
       break;
     case ngran_gNB:
       mac_rrc_dl_direct_init(&rrc->mac_rrc);
@@ -1422,6 +1423,83 @@ static void process_Periodical_Measurement_Report(gNB_RRC_UE_t *ue_ctxt, NR_Meas
   AssertFatal(id, "unexpected MeasResult for MeasurementId %ld received\n", id);
   asn1cCallocOne(ue_ctxt->measResults, measurementReport->criticalExtensions.choice.measurementReport->measResults);
   /* we "keep" the measurement report, so set to 0 */
+
+  NR_MeasResults_t *measResults = ue_ctxt->measResults;
+  if (measResults->measResultServingMOList.list.count > 0 && measResults->measResultServingMOList.list.array[0] != NULL) {
+    if (measResults != NULL) {
+      if (measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrp) {
+        ue_ctxt->rsrp =
+            *measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrp
+            - 156;
+      }
+      if (measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrq) {
+        ue_ctxt->rsrq = (float)(*measResults->measResultServingMOList.list.array[0]
+                                     ->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrq
+                                - 87)
+                        / 2.0f;
+      }
+      if (measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->sinr) {
+        ue_ctxt->sinr = (float)(*measResults->measResultServingMOList.list.array[0]
+                                     ->measResultServingCell.measResult.cellResults.resultsSSB_Cell->sinr
+                                - 46)
+                        / 2.0f;
+      }
+    }
+  }
+
+  // Print only when there are Neighbour Cells
+  if (measResults->measResultNeighCells
+      && measResults->measResultNeighCells->present == NR_MeasResults__measResultNeighCells_PR_measResultListNR) {
+    DevAssert(measResults->measResultServingMOList.list.count >= 1);
+    if (measResults->measResultServingMOList.list.count > 1)
+      LOG_W(RRC, "Received %d MeasResultServMO, but handling only 1!\n", measResults->measResultServingMOList.list.count);
+
+    printf("measId: %ld\n", id);
+    NR_MeasResultServMO_t *measresultservmo = measResults->measResultServingMOList.list.array[0];
+    NR_MeasResultNR_t *measresultnr = &measresultservmo->measResultServingCell;
+    NR_MeasQuantityResults_t *mqr = measresultnr->measResult.cellResults.resultsSSB_Cell;
+    if (measresultnr->physCellId)
+      printf("    servingCellId %ld MeasResultNR for phyCellId %ld:\n      resultSSB:",
+             measresultservmo->servCellId,
+             *measresultnr->physCellId);
+    if (mqr != NULL) {
+      if (mqr->rsrp) {
+        const long rrsrp = *mqr->rsrp - 156;
+        printf("RSRP %ld dBm ", rrsrp);
+      }
+      if (mqr->rsrq) {
+        const float rrsrq = (float)(*mqr->rsrq - 87) / 2.0f;
+        printf("RSRQ %.1f dB ", rrsrq);
+      }
+      if (mqr->sinr) {
+        const float rsinr = (float)(*mqr->sinr - 46) / 2.0f;
+        printf("SINR %.1f dB ", rsinr);
+      }
+      printf("\n");
+    } else {
+      printf("NOT PROVIDED\n");
+    }
+
+    if (measResults->measResultNeighCells
+        && measResults->measResultNeighCells->present == NR_MeasResults__measResultNeighCells_PR_measResultListNR) {
+      NR_MeasResultListNR_t *meas_neigh = measResults->measResultNeighCells->choice.measResultListNR;
+      for (int i = 0; i < meas_neigh->list.count; ++i) {
+        NR_MeasResultNR_t *measresultneigh = meas_neigh->list.array[i];
+        NR_MeasQuantityResults_t *neigh_mqr = measresultneigh->measResult.cellResults.resultsSSB_Cell;
+        if (measresultneigh->physCellId)
+          printf("    neighboring cell for phyCellId %ld:\n      resultSSB:", *measresultneigh->physCellId);
+        if (mqr != NULL) {
+          const long rrsrp = *neigh_mqr->rsrp - 156;
+          const float rrsrq = (float)(*neigh_mqr->rsrq - 87) / 2.0f;
+          const float rsinr = (float)(*neigh_mqr->sinr - 46) / 2.0f;
+          printf("RSRP %ld dBm RSRQ %.1f dB SINR %.1f dB\n", rrsrp, rrsrq, rsinr);
+        } else {
+          printf("NOT PROVIDED\n");
+        }
+      }
+    }
+  }
+
   free(measurementReport->criticalExtensions.choice.measurementReport);
   measurementReport->criticalExtensions.choice.measurementReport = NULL;
 }
@@ -1452,6 +1530,9 @@ static void process_Event_Based_Measurement_Report(gNB_RRC_INST *rrc,
         }
         LOG_I(NR_RRC, "Serving Cell %d RSRP: %d\n", scell_pci, servingCellRSRP);
       }
+
+      // Do nothing, for now, on Event A2
+      break;
 
       const f1ap_served_cell_info_t *serving_cell = get_cell_information_by_phycellId(scell_pci);
       nr_rrc_du_container_t *source_du = get_du_by_cell_id(rrc, serving_cell->nr_cellid);
@@ -1906,8 +1987,8 @@ static void handle_rrcReconfigurationComplete(gNB_RRC_INST *rrc, gNB_RRC_UE_t *U
       break;
   }
 
-  if (UE->xids[xid] == RRC_PDUSESSION_ESTABLISH)
-    UE->ongoing_pdusession_setup_request = false;
+  if (UE->xids[xid] == RRC_PDUSESSION_ESTABLISH || UE->xids[xid] == RRC_PDUSESSION_RELEASE)
+    UE->ongoing_transaction = false;
 
   UE->xids[xid] = RRC_ACTION_NONE;
   for (int i = 0; i < NR_RRC_TRANSACTION_IDENTIFIER_NUMBER; ++i) {
@@ -1917,7 +1998,12 @@ static void handle_rrcReconfigurationComplete(gNB_RRC_INST *rrc, gNB_RRC_UE_t *U
   }
 
   if (UE->ho_context != NULL) {
-    LOG_A(NR_RRC, "handover for UE %d/RNTI %04x complete!\n", UE->rrc_ue_id, UE->rnti);
+    struct timespec ho_end_ts;
+    clock_gettime(CLOCK_REALTIME, &ho_end_ts);
+    UE->ho_elapsed_ms = (ho_end_ts.tv_sec - UE->ho_context->ho_start_ts.tv_sec) * 1000.0
+                        + (ho_end_ts.tv_nsec - UE->ho_context->ho_start_ts.tv_nsec) / 1000000.0;
+
+    LOG_A(NR_RRC, "Handover for UE %d/RNTI %04x complete in %.3f milliseconds!\n", UE->rrc_ue_id, UE->rnti, UE->ho_elapsed_ms);
     DevAssert(UE->ho_context->target != NULL);
 
     UE->ho_context->target->ho_success(rrc, UE);
@@ -2253,6 +2339,62 @@ static void rrc_CU_process_ue_context_setup_response(MessageDef *msg_p, instance
     UE->measConfig->measGapConfig = measGapConfig;
   }
 
+  struct NR_CSI_MeasConfig__csi_IM_ResourceToReleaseList csi_IM_ResourceToReleaseList = {0};
+  struct NR_CSI_MeasConfig__csi_IM_ResourceSetToReleaseList csi_IM_ResourceSetToReleaseList = {0};
+  struct NR_CSI_MeasConfig__csi_ReportConfigToReleaseList csi_ReportConfigToReleaseList = {0};
+
+  NR_CSI_MeasConfig_t *csi_MeasConfig_s = NULL;
+  int csi_IM_ResourceToAddModList_count = 0;
+  int csi_IM_ResourceSetToAddModList_count = 0;
+  int csi_ResourceConfigToAddModList_count = 0;
+  int csi_ReportConfigToAddModList_count = 0;
+  if (UE->masterCellGroup && UE->masterCellGroup->spCellConfig && UE->masterCellGroup->spCellConfig->spCellConfigDedicated
+      && UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig) {
+    csi_MeasConfig_s = UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig->choice.setup;
+    if (csi_MeasConfig_s->csi_IM_ResourceToAddModList)
+      csi_IM_ResourceToAddModList_count = csi_MeasConfig_s->csi_IM_ResourceToAddModList->list.count;
+    if (csi_MeasConfig_s->csi_IM_ResourceSetToAddModList)
+      csi_IM_ResourceSetToAddModList_count = csi_MeasConfig_s->csi_IM_ResourceSetToAddModList->list.count;
+    if (csi_MeasConfig_s->csi_ResourceConfigToAddModList)
+      csi_ResourceConfigToAddModList_count = csi_MeasConfig_s->csi_ResourceConfigToAddModList->list.count;
+    if (csi_MeasConfig_s->csi_ReportConfigToAddModList)
+      csi_ReportConfigToAddModList_count = csi_MeasConfig_s->csi_ReportConfigToAddModList->list.count;
+  }
+  NR_CSI_IM_ResourceId_t imres[csi_IM_ResourceToAddModList_count];
+  NR_CSI_IM_ResourceSetId_t imsetres[csi_IM_ResourceSetToAddModList_count];
+  NR_CSI_ReportConfigId_t imrep[csi_ReportConfigToAddModList_count];
+
+  if (UE->ho_context && csi_MeasConfig_s) {
+    for (int i = 0; i < csi_IM_ResourceToAddModList_count; i++) {
+      imres[i] = csi_MeasConfig_s->csi_IM_ResourceToAddModList->list.array[i]->csi_IM_ResourceId;
+      asn1cSeqAdd(&csi_IM_ResourceToReleaseList.list, &imres[i]);
+    }
+
+    for (int i = 0; i < csi_IM_ResourceSetToAddModList_count; i++) {
+      imsetres[i] = csi_MeasConfig_s->csi_IM_ResourceSetToAddModList->list.array[i]->csi_IM_ResourceSetId;
+      asn1cSeqAdd(&csi_IM_ResourceSetToReleaseList.list, &imsetres[i]);
+    }
+
+    int im_id = -1;
+    for (int i = 0; i < csi_ResourceConfigToAddModList_count; i++) {
+      NR_CSI_ResourceConfig_t *csires = csi_MeasConfig_s->csi_ResourceConfigToAddModList->list.array[i];
+      if (csires->csi_RS_ResourceSetList.present == NR_CSI_ResourceConfig__csi_RS_ResourceSetList_PR_csi_IM_ResourceSetList) {
+        if (csires->csi_RS_ResourceSetList.choice.csi_IM_ResourceSetList) {
+          im_id = csires->csi_ResourceConfigId;
+        }
+      }
+    }
+    if (im_id > 0) {
+      for (int i = 0; i < csi_ReportConfigToAddModList_count; i++) {
+        NR_CSI_ReportConfig_t *csirep = csi_MeasConfig_s->csi_ReportConfigToAddModList->list.array[i];
+        if (csirep->csi_IM_ResourcesForInterference && *csirep->csi_IM_ResourcesForInterference == im_id) {
+          imrep[i] = csirep->reportConfigId;
+          asn1cSeqAdd(&csi_ReportConfigToReleaseList.list, &imrep);
+        }
+      }
+    }
+ }
+
   if (UE->masterCellGroup) {
     ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->masterCellGroup);
     LOG_I(RRC, "UE %04x replacing existing CellGroupConfig with new one received from DU\n", UE->rnti);
@@ -2289,7 +2431,30 @@ static void rrc_CU_process_ue_context_setup_response(MessageDef *msg_p, instance
     DevAssert(resp->crnti != NULL);
     UE->ho_context->target->du_ue_id = resp->gNB_DU_ue_id;
     UE->ho_context->target->new_rnti = *resp->crnti;
+
+    NR_CSI_MeasConfig_t *csi_MeasConfig = UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig->choice.setup;
+
+    if (csi_MeasConfig->csi_IM_ResourceToAddModList == NULL && csi_IM_ResourceToReleaseList.list.count > 0)
+      csi_MeasConfig->csi_IM_ResourceToReleaseList = &csi_IM_ResourceToReleaseList;
+
+    if (csi_MeasConfig->csi_IM_ResourceSetToAddModList == NULL && csi_IM_ResourceSetToReleaseList.list.count > 0)
+      csi_MeasConfig->csi_IM_ResourceSetToReleaseList = &csi_IM_ResourceSetToReleaseList;
+
+    if (csi_MeasConfig->csi_IM_ResourceSetToAddModList == NULL && csi_ReportConfigToReleaseList.list.count > 0)
+      csi_MeasConfig->csi_ReportConfigToReleaseList = &csi_ReportConfigToReleaseList;
+
     UE->ho_context->target->ho_req_ack(rrc, UE);
+  }
+
+  // At this point, the RRCReconfiguration has already been sent, and the scope of the csi_IM_ResourceToReleaseList,
+  // csi_IM_ResourceSetToReleaseList and csi_ReportConfigToReleaseList variables ends here. Then the memory will be freed, and we
+  // have to set the associated variables to NULL.
+  if (UE->masterCellGroup && UE->masterCellGroup->spCellConfig && UE->masterCellGroup->spCellConfig->spCellConfigDedicated
+      && UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig) {
+    NR_CSI_MeasConfig_t *csi_MeasConfig = UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig->choice.setup;
+    csi_MeasConfig->csi_IM_ResourceToReleaseList = NULL;
+    csi_MeasConfig->csi_IM_ResourceSetToReleaseList = NULL;
+    csi_MeasConfig->csi_ReportConfigToReleaseList = NULL;
   }
 }
 
@@ -2352,10 +2517,22 @@ static void rrc_CU_process_ue_context_release_request(MessageDef *msg_p, sctp_as
 static void rrc_delete_ue_data(gNB_RRC_UE_t *UE)
 {
   ASN_STRUCT_FREE(asn_DEF_NR_UE_NR_Capability, UE->UE_Capability_nr);
+  UE->UE_Capability_nr = NULL;
+
+  if (UE->masterCellGroup && UE->masterCellGroup->spCellConfig && UE->masterCellGroup->spCellConfig->spCellConfigDedicated
+      && UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig) {
+    NR_CSI_MeasConfig_t *csi_MeasConfig = UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig->choice.setup;
+    csi_MeasConfig->csi_IM_ResourceToReleaseList = NULL;
+    csi_MeasConfig->csi_IM_ResourceSetToAddModList = NULL;
+    csi_MeasConfig->csi_ReportConfigToReleaseList = NULL;
+  }
   ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->masterCellGroup);
+  UE->masterCellGroup = NULL;
   ASN_STRUCT_FREE(asn_DEF_NR_MeasResults, UE->measResults);
+  UE->measResults = NULL;
   FREE_AND_ZERO_BYTE_ARRAY(UE->ue_cap_buffer);
   free_MeasConfig(UE->measConfig);
+  UE->measConfig = NULL;
   free(UE->redcap_cap);
   UE->redcap_cap = NULL;
   seq_arr_free(&UE->pduSessions, free_pdusession);
@@ -2502,6 +2679,10 @@ static void rrc_CU_process_ue_modification_required(MessageDef *msg_p, instance_
     }
 
     if (UE->masterCellGroup) {
+      NR_CSI_MeasConfig_t *csi_MeasConfig = UE->masterCellGroup->spCellConfig->spCellConfigDedicated->csi_MeasConfig->choice.setup;
+      csi_MeasConfig->csi_IM_ResourceToReleaseList = NULL;
+      csi_MeasConfig->csi_IM_ResourceSetToAddModList = NULL;
+      csi_MeasConfig->csi_ReportConfigToReleaseList = NULL;
       ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->masterCellGroup);
       LOG_I(RRC, "UE %d/RNTI %04x replacing existing CellGroupConfig with new one received from DU\n", UE->rrc_ue_id, UE->rnti);
     }
@@ -2908,7 +3089,7 @@ void *rrc_gnb_task(void *args_p) {
         break;
 
       case NGAP_PDUSESSION_RELEASE_COMMAND:
-        rrc_gNB_process_NGAP_PDUSESSION_RELEASE_COMMAND(&NGAP_PDUSESSION_RELEASE_COMMAND(msg_p), RC.nrrrc[instance]);
+        rrc_gNB_process_NGAP_PDUSESSION_RELEASE_COMMAND(&NGAP_PDUSESSION_RELEASE_COMMAND(msg_p), RC.nrrrc[instance], msg_p);
         break;
 
       /* Messages from F1AP task */

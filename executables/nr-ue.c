@@ -448,8 +448,26 @@ static void UE_synch(void *arg) {
       UE->freq_offset = freq_offset;
     } else {
       // rerun with new cell parameters and frequency-offset
-      nr_rf_card_config_freq(cfg0, ul_carrier, dl_carrier, freq_offset);
+      nr_rf_card_config_freq(cfg0,
+                             (uint64_t)cfg0->tx_freq[0],
+                             (uint64_t)cfg0->rx_freq[0],
+                             freq_offset);
+
       UE->rfdevice.trx_set_freq_func(&UE->rfdevice, cfg0);
+      LOG_A(PHY,
+            "Adjusting hardware frequency offset to %d Hz (computed SSB offset %d Hz)\n",
+            (int)((double)dl_carrier - cfg0->rx_freq[0]),
+            UE->common_vars.freq_offset);
+
+      if (abs(UE->common_vars.freq_offset) > abs(UE->frame_parms.subcarrier_spacing / 100)) {
+        LOG_W(PHY,
+              "Computed SSB offset %d Hz > %d Hz, resynchronizing again...\n",
+              UE->common_vars.freq_offset,
+              (UE->frame_parms.subcarrier_spacing / 100));
+        // Reset frequency offset after applying new frequency with nr_rf_card_config_freq
+        UE->common_vars.freq_offset = 0;
+        return;
+      }
     }
 
     if (get_nrUE_params()->agc) {
@@ -1003,6 +1021,21 @@ void *UE_thread(void *arg)
   int ntn_koffset = 0;
 
   int duration_rx_to_tx = NR_UE_CAPABILITY_SLOT_RX_TO_TX;
+  // Increase 'duration_rx_to_tx' value to avoid LLLLLLs on the UE
+  // This value MUST be less or equal to 'min_rxtxtime' on the gNB config file
+  switch (get_softmodem_params()->numerology) {
+    case 0: // 15 kHz SCS
+      duration_rx_to_tx = 4;
+      break;
+    case 1: // 30 kHz SCS
+      duration_rx_to_tx = 4;
+      break;
+    case 3: // 120 kHz SCS
+      duration_rx_to_tx = 6;
+      break;
+    default:
+      break;
+  }
   int timing_advance = UE->timing_advance;
   UE->N_TA_offset = determine_N_TA_offset(UE);
   NR_UE_MAC_INST_t *mac = get_mac_inst(UE->Mod_id);

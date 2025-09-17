@@ -279,6 +279,11 @@ void nr_csi_meas_reporting(int Mod_idP,frame_t frame, slot_t slot)
 
       const int pucch_index = get_pucch_index(sched_frame, sched_slot, &nrmac->frame_structure, sched_ctrl->sched_pucch_size);
       NR_sched_pucch_t *curr_pucch = &sched_ctrl->sched_pucch[pucch_index];
+      if (curr_pucch->active) {
+        LOG_E(NR_MAC, "CSI structure is scheduled in advance. It should be free!\n");
+        memset(curr_pucch, 0, sizeof(*curr_pucch));
+      }
+
       AssertFatal(curr_pucch->active == false, "CSI structure is scheduled in advance. It should be free!\n");
       curr_pucch->r_pucch = -1;
       curr_pucch->frame = sched_frame;
@@ -1199,8 +1204,8 @@ int nr_acknack_scheduling(gNB_MAC_INST *mac,
                                            curr_pucch->resource_indicator))
         continue;
       // TODO temporarily limit ack/nak to 3 bits because of performances of polar for PUCCH (required for > 11 bits)
-      if (curr_pucch->csi_bits > 0 && curr_pucch->dai_c >= 3)
-        continue;
+      //if (curr_pucch->csi_bits > 0 && curr_pucch->dai_c >= 3)
+      //  continue;
 
       // otherwise we can schedule in this active PUCCH
       // no need to check VRB occupation because already done when PUCCH has been activated

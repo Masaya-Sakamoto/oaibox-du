@@ -1959,7 +1959,7 @@ bool nr_check_Msg4_MsgB_Ack(module_id_t module_id, frame_t frame, slot_t slot, N
   if (harq->round == 0) {
     if (success) {
       gNB_MAC_INST *nr_mac = RC.nrmac[module_id];
-      NR_ServingCellConfigCommon_t *scc = nr_mac->common_channels[0].ServingCellConfigCommon;
+      //NR_ServingCellConfigCommon_t *scc = nr_mac->common_channels[0].ServingCellConfigCommon;
       LOG_A(NR_MAC,
             "%4d.%2d UE %04x: Received Ack of %s. CBRA procedure succeeded (%s)\n",
             frame,
@@ -1968,8 +1968,14 @@ bool nr_check_Msg4_MsgB_Ack(module_id_t module_id, frame_t frame, slot_t slot, N
             ra_type_str,
             UE->CellGroup ? "UE Connected" : "UE Rejected");
       if (UE->CellGroup) {
+        // Pause scheduling according to:
+        // 3GPP TS 38.331 Section 12 Table 12.1-1: UE performance requirements for RRC procedures for UEs
+        // Msg4 may transmit a RRCReconfiguration, for example when UE sends RRCReestablishmentComplete and MAC CE for C-RNTI in Msg3.
+        // In that case, gNB will generate a RRCReconfiguration that will be transmitted in Msg4, so we need to apply CellGroup after the Ack,
+        int delay = nr_mac_get_reconfig_delay_slots(UE->current_UL_BWP.scs);
+        nr_mac_interrupt_ue_transmission(nr_mac, UE, FOLLOW_INSYNC_RECONFIG, delay);
         // we configure the UE using common search space with DCIX0 while waiting for a reconfiguration
-        configure_UE_BWP(nr_mac, scc, UE, false, NR_SearchSpace__searchSpaceType_PR_common, -1, -1);
+        //configure_UE_BWP(nr_mac, scc, UE, false, NR_SearchSpace__searchSpaceType_PR_common, -1, -1);
         transition_ra_connected_nr_ue(nr_mac, UE);
       } else {  // in case of  UE reject
         nr_release_ra_UE(nr_mac, UE->rnti);

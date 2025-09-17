@@ -23,11 +23,13 @@
 
 //#define NR_SSS_DEBUG
 
-int nr_generate_sss(  c16_t *txdataF,
-                      int16_t amp,
-                      uint8_t ssb_start_symbol,
-                      nfapi_nr_config_request_scf_t* config,
-                      NR_DL_FRAME_PARMS *frame_parms)
+int nr_generate_sss(c16_t **txdataF,
+                    int txdataF_offset,
+                    int16_t amp,
+                    uint8_t ssb_start_symbol,
+                    nfapi_nr_config_request_scf_t *config,
+                    NR_DL_FRAME_PARMS *frame_parms,
+                    c16_t *w)
 {
   int16_t x0[NR_SSS_LENGTH];
   int16_t x1[NR_SSS_LENGTH];
@@ -64,7 +66,11 @@ int nr_generate_sss(  c16_t *txdataF,
 
   for (int i = 0; i < NR_SSS_LENGTH; i++) {
     int16_t d_sss = (1 - 2*x0[(i + m0) % NR_SSS_LENGTH] ) * (1 - 2*x1[(i + m1) % NR_SSS_LENGTH] ) * 23170;
-    ((int16_t*)txdataF)[2*(l*frame_parms->ofdm_symbol_size + k)] = (((int16_t)amp) * d_sss) >> 15;
+    for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+      c16_t *txF = &txdataF[atx][txdataF_offset];
+      c16_t d = {(((int16_t)amp) * d_sss) >> 15, 0};
+      txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+    }
     k++;
 
     if (k >= frame_parms->ofdm_symbol_size)

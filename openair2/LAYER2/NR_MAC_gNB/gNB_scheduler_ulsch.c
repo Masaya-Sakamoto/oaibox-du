@@ -172,6 +172,34 @@ bwp_info_t get_pusch_bwp_start_size(NR_UE_info_t *UE)
   return bwp_info;
 }
 
+nssai_bwp_info_t get_pusch_nssai_start_size(gNB_MAC_INST *nrmac, NR_UE_info_t *UE)
+{
+  NR_UE_UL_BWP_t *ul_bwp = &UE->current_UL_BWP;
+  NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+  nssai_bwp_info_t nssai_bwp_info;
+  nssai_bwp_info.prb_start = ul_bwp->BWPStart;
+  nssai_bwp_info.num_prbs = ul_bwp->BWPSize;
+
+  uint8_t prev_sst = 0;
+  for (int j = 0; j < seq_arr_size(&nrmac->nssai_config_ul); j++) {
+    const nssai_config_t *n = seq_arr_at(&nrmac->nssai_config_ul, j);
+    if (n->sst > prev_sst) {
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); i++) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        if (c->nssai.sst == n->sst && c->nssai.sd == n->sd) {
+          nssai_bwp_info.prb_start = n->prb_start;
+          nssai_bwp_info.num_prbs = n->num_prbs;
+          prev_sst = n->sst;
+          LOG_D(NR_MAC, "UL: SST %d start PRB %d num PRBs %d\n", c->nssai.sst, nssai_bwp_info.prb_start, nssai_bwp_info.num_prbs);
+          break;
+        }
+      }
+    }
+  }
+
+  return nssai_bwp_info;
+}
+
 static int compute_ph_factor(int mu, int tbs_bits, int rb, int n_layers, int n_symbols, int n_dmrs, long *deltaMCS, bool include_bw)
 {
   // 38.213 7.1.1
@@ -1797,6 +1825,14 @@ static bool allocate_ul_retransmission(gNB_MAC_INST *nrmac,
   bwp_info_t bwp_info = get_pusch_bwp_start_size(UE);
   const uint32_t bwpSize = bwp_info.bwpSize;
   const uint32_t bwpStart = bwp_info.bwpStart;
+  uint16_t rbStop = bwpSize - 1;
+
+  if (UE->current_UL_BWP.dci_format == NR_UL_DCI_FORMAT_0_1) {
+    nssai_bwp_info_t nssai_bwp_info = get_pusch_nssai_start_size(nrmac, UE);
+    rbStart = nssai_bwp_info.prb_start;
+    rbStop = nssai_bwp_info.prb_start + nssai_bwp_info.num_prbs - 1;
+  }
+
   const uint8_t nrOfLayers = retInfo->nrOfLayers;
   LOG_D(NR_MAC,"retInfo->time_domain_allocation = %d, tda = %d\n", retInfo->time_domain_allocation, tda);
 
@@ -1811,16 +1847,16 @@ static bool allocate_ul_retransmission(gNB_MAC_INST *nrmac,
   if (reuse_old_tda && nrOfLayers == retInfo->nrOfLayers) {
     /* Check the resource is enough for retransmission */
     const uint16_t slbitmap = SL_to_bitmap(retInfo->tda_info.startSymbolIndex, retInfo->tda_info.nrOfSymbols);
-    while (rbStart < bwpSize && (rballoc_mask[rbStart + bwpStart] & slbitmap))
+    while (rbStart < rbStop && (rballoc_mask[rbStart + bwpStart] & slbitmap))
       rbStart++;
-    if (rbStart + retInfo->rbSize > bwpSize) {
-      LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate UL retransmission: no resources (rbStart %d, retInfo->rbSize %d, bwpSize %d) \n",
+    if (rbStart + retInfo->rbSize > rbStop + 1) {
+      LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate UL retransmission: no resources (rbStart %d, retInfo->rbSize %d, rbStop %d) \n",
             UE->rnti,
             frame,
             slot,
             rbStart,
             retInfo->rbSize,
-            bwpSize);
+            rbStop);
       return false;
     }
     new_sched.rbStart = rbStart;
@@ -1830,10 +1866,10 @@ static bool allocate_ul_retransmission(gNB_MAC_INST *nrmac,
     /* the retransmission will use a different time domain allocation, check
      * that we have enough resources */
     const uint16_t slbitmap = SL_to_bitmap(tda_info->startSymbolIndex, tda_info->nrOfSymbols);
-    while (rbStart < bwpSize && (rballoc_mask[rbStart + bwpStart] & slbitmap))
+    while (rbStart < rbStop && (rballoc_mask[rbStart + bwpStart] & slbitmap))
       rbStart++;
     int rbSize = 0;
-    while (rbStart + rbSize < bwpSize && !(rballoc_mask[rbStart + bwpStart + rbSize] & slbitmap))
+    while (rbStart + rbSize <= rbStop && !(rballoc_mask[rbStart + bwpStart + rbSize] & slbitmap))
       rbSize++;
     uint32_t new_tbs;
     uint16_t new_rbSize;
@@ -2044,13 +2080,23 @@ static int  pf_ul(gNB_MAC_INST *nrmac,
       continue;
     }
 
+    uint32_t ulsch_max_frame_inactivity = nrmac->ulsch_max_frame_inactivity;
+    // Apply NSSAI specific scheduling coefficients, set ulsch_max_frame_inactivity to 0 for URLLC slice and HDLLC
+    for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+      const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+      if (c->nssai.sst == 2 || c->nssai.sst == 6) {
+        ulsch_max_frame_inactivity = 0;
+        break;
+      }
+    }
+
     const int B = max(0, sched_ctrl->estimated_ul_buffer - sched_ctrl->sched_ul_bytes);
     /* preprocessor computed sched_frame/sched_slot */
     const bool do_sched = nr_UE_is_to_be_scheduled(&nrmac->frame_structure,
                                                    UE,
                                                    sched_frame,
                                                    sched_slot,
-                                                   nrmac->ulsch_max_frame_inactivity);
+                                                   ulsch_max_frame_inactivity);
 
     LOG_D(NR_MAC,"pf_ul: do_sched UE %04x => %s\n", UE->rnti, do_sched ? "yes" : "no");
     if ((B == 0 && !do_sched) || nr_timer_is_active(&sched_ctrl->transm_interrupt)) {
@@ -2078,6 +2124,13 @@ static int  pf_ul(gNB_MAC_INST *nrmac,
     /* Calculate coefficient*/
     const uint32_t tbs = ul_pf_tbs[current_BWP->mcs_table][selected_mcs];
     float coeff_ue = (float) tbs / UE->ul_thr_ue;
+
+    // Apply NSSAI specific scheduling coefficients
+    for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+      const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+      coeff_ue = coeff_ue * get_nssai_sched_coeff(c->nssai.sst);
+    }
+
     bool sched_inactive = B == 0 && do_sched;
     LOG_D(NR_MAC, "[UE %04x][%4d.%2d] b %d, ul_thr_ue %f, tbs %d, coeff_ue %f, sched_inactive %d\n",
           UE->rnti,
@@ -2151,35 +2204,41 @@ static int  pf_ul(gNB_MAC_INST *nrmac,
     int rbStart = 0;
     const uint16_t slbitmap = SL_to_bitmap(tda_info->startSymbolIndex, tda_info->nrOfSymbols);
     bwp_info_t bi = get_pusch_bwp_start_size(iterator->UE);
-    while (rbStart < bi.bwpSize && (rballoc_mask[rbStart + bi.bwpStart] & slbitmap))
+    uint16_t rbStop = bi.bwpSize - 1;
+    if (iterator->UE->current_UL_BWP.dci_format == NR_UL_DCI_FORMAT_0_1) {
+      nssai_bwp_info_t nssai_bwp_info = get_pusch_nssai_start_size(nrmac, iterator->UE);
+      rbStart = nssai_bwp_info.prb_start;
+      rbStop = nssai_bwp_info.prb_start + nssai_bwp_info.num_prbs - 1;
+    }
+    while (rbStart < rbStop && (rballoc_mask[rbStart + bi.bwpStart] & slbitmap))
       rbStart++;
     /* if it's for inactivity, min_grant_prb is enough, otherwise check what
      * would be the maximum */
-    uint16_t max_rbSize = iterator->sched_inactive ? min_rb : bi.bwpSize;
+    uint16_t max_rbSize = iterator->sched_inactive ? min_rb : rbStop + 1;
     uint16_t available_rb = 1;
-    while (rbStart + available_rb < bi.bwpSize && !(rballoc_mask[rbStart + bi.bwpStart + available_rb] & slbitmap) && available_rb < max_rbSize)
+    while (rbStart + available_rb <= rbStop && !(rballoc_mask[rbStart + bi.bwpStart + available_rb] & slbitmap) && available_rb < max_rbSize)
       available_rb++;
 
-    if (rbStart + min_rb > bi.bwpSize || available_rb < min_rb) {
+    if (rbStart + min_rb > rbStop + 1 || available_rb < min_rb) {
       reset_beam_status(&nrmac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, dci_beam.new_beam);
       reset_beam_status(&nrmac->beam_info, sched_frame, sched_slot, iterator->UE->UE_beam_index, slots_per_frame, beam.new_beam);
-      LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate UL data: no resources (rbStart %d, min_rb %d, bwpSize %d)\n",
+      LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate UL data: no resources (rbStart %d, min_rb %d, rbStop %d)\n",
             iterator->UE->rnti,
             frame,
             slot,
             rbStart,
             min_rb,
-            bi.bwpSize);
+            rbStop);
       iterator++;
       continue;
     } else
       LOG_D(NR_MAC,
-            "allocating UL data for RNTI %04x (rbStart %d, min_rb %d, available_rb %d, bwpSize %d)\n",
+            "allocating UL data for RNTI %04x (rbStart %d, min_rb %d, available_rb %d, rbStop %d)\n",
             iterator->UE->rnti,
             rbStart,
             min_rb,
             available_rb,
-            bi.bwpSize);
+            rbStop);
 
     int nrOfLayers = get_ul_nrOfLayers(sched_ctrl, current_BWP->dci_format);
     NR_sched_pusch_t sched = {

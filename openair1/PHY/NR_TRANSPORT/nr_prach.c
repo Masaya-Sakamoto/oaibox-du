@@ -72,6 +72,10 @@ int16_t find_nr_prach(PHY_VARS_gNB *gNB,int frame, int slot, find_type_t type) {
 int nr_fill_prach(PHY_VARS_gNB *gNB, int SFN, int Slot, nfapi_nr_prach_pdu_t *prach_pdu)
 {
   int prach_id = find_nr_prach(gNB, SFN, Slot, SEARCH_EXIST_OR_FREE);
+  if (prach_id < 0 || prach_id >= NUMBER_OF_NR_PRACH_MAX) {
+    LOG_E(NR_PHY, "illegal or no prach_id found!!! prach_id %d\n", prach_id);
+    return -1;
+  }
   AssertFatal(((prach_id >= 0) && (prach_id < NUMBER_OF_NR_PRACH_MAX)), "illegal or no prach_id found!!! prach_id %d\n", prach_id);
   gNB_PRACH_list_t *prach = &gNB->prach_vars.list[prach_id];
   prach->frame = SFN;
@@ -132,6 +136,10 @@ int16_t find_nr_prach_ru(RU_t *ru,int frame,int slot, find_type_t type)
 void nr_fill_prach_ru(RU_t *ru, int SFN, int Slot, nfapi_nr_prach_pdu_t *prach_pdu, int *beam_id)
 {
   int prach_id = find_nr_prach_ru(ru, SFN, Slot, SEARCH_EXIST_OR_FREE);
+  if (prach_id < 0 || prach_id >= NUMBER_OF_NR_PRACH_MAX) {
+    LOG_E(NR_PHY, "illegal or no prach_id found!!! prach_id %d\n", prach_id);
+    return;
+  }
   AssertFatal((prach_id >= 0) && (prach_id < NUMBER_OF_NR_PRACH_MAX),
               "illegal or no prach_id found!!! prach_id %d\n",
               prach_id);
@@ -205,7 +213,7 @@ void rx_nr_prach_ru(RU_t *ru,
   AssertFatal(ru->if_south == LOCAL_RF || ru->if_south == REMOTE_IF5,
               "we shouldn't call this if if_south != LOCAL_RF or REMOTE_IF5\n");
 
-  for (int aa = 0; aa < ru->nb_rx; aa++) { 
+  for (int aa = 0; aa < ru->nb_rx; aa++) {
     if (prach_sequence_length == 0)
       slot2 = prachStartSlot;
     int idx = aa + beam * ru->nb_rx;
@@ -337,6 +345,12 @@ void rx_nr_prach_ru(RU_t *ru,
     // 5 MHz @ 7.68 Ms/s
     Ncp >>= 2;
     dftlen >>= 2;
+    break;
+
+  case 11520:
+    // 10 MHz @ 11.52 Ms/s
+    Ncp = (Ncp * 3) / 4 >> 1;
+    dftlen = (dftlen * 3) / 4 >> 1;
     break;
 
   case 15360:

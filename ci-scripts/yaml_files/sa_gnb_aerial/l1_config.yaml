@@ -1,0 +1,8 @@
+# Add parameters here to be set in cuphycontroller_{...}.yaml
+# Parameter names ARE case-sensitive, and must match the target parameter name
+
+enable_srs: 0
+eAxC_id_srs: [8,9,0xa,0xb]
+dst_mac_addr: 6c:ad:ad:00:0a:78
+#ul_order_timeout_cpu_ns: 8000000
+#ul_order_timeout_gpu_ns: 6000000

@@ -422,6 +422,35 @@ bwp_info_t get_pdsch_bwp_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE)
   return bwp_info;
 }
 
+nssai_bwp_info_t get_pdsch_nssai_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE)
+{
+  NR_UE_DL_BWP_t *dl_bwp = &UE->current_DL_BWP;
+  NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+
+  nssai_bwp_info_t nssai_bwp_info;
+  nssai_bwp_info.prb_start = dl_bwp->BWPStart;
+  nssai_bwp_info.num_prbs = dl_bwp->BWPSize;
+
+  uint8_t prev_sst = 0;
+  for (int j = 0; j < seq_arr_size(&nr_mac->nssai_config_dl); j++) {
+    const nssai_config_t *n = seq_arr_at(&nr_mac->nssai_config_dl, j);
+    if (n->sst > prev_sst) {
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); i++) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        if (c->nssai.sst == n->sst && c->nssai.sd == n->sd) {
+          nssai_bwp_info.prb_start = n->prb_start;
+          nssai_bwp_info.num_prbs = n->num_prbs;
+          prev_sst = n->sst;
+          LOG_D(NR_MAC, "DL: SST %d start PRB %d num PRBs %d\n", c->nssai.sst, nssai_bwp_info.prb_start, nssai_bwp_info.num_prbs);
+          break;
+        }
+      }
+    }
+  }
+  return nssai_bwp_info;
+}
+
+
 static bool allocate_dl_retransmission(module_id_t module_id,
                                        frame_t frame,
                                        slot_t slot,
@@ -476,6 +505,12 @@ static bool allocate_dl_retransmission(module_id_t module_id,
   int rbStop = bwp_info.bwpStart + bwp_info.bwpSize - 1;
   int rbSize = 0;
 
+  if (UE->current_DL_BWP.dci_format == NR_DL_DCI_FORMAT_1_1) {
+    nssai_bwp_info_t nssai_bwp_info = get_pdsch_nssai_start_size(nr_mac, UE);
+    rbStart = nssai_bwp_info.prb_start;
+    rbStop = nssai_bwp_info.prb_start + nssai_bwp_info.num_prbs - 1;
+  }
+
   if (reuse_old_tda && layers == retInfo->nrOfLayers) {
     /* Check that there are enough resources for retransmission */
     while (rbSize < retInfo->rbSize) {
@@ -483,10 +518,10 @@ static bool allocate_dl_retransmission(module_id_t module_id,
       rbSize = 0;
 
       const uint16_t slbitmap = SL_to_bitmap(retInfo->tda_info.startSymbolIndex, retInfo->tda_info.nrOfSymbols);
-      while (rbStart < rbStop && (rballoc_mask[rbStart] & slbitmap))
+      while (rbStart <= rbStop && (rballoc_mask[rbStart] & slbitmap))
         rbStart++;
 
-      if (rbStart >= rbStop) {
+      if (rbStart > rbStop) {
         LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate DL retransmission: no resources\n", UE->rnti, frame, slot);
         return false;
       }
@@ -702,6 +737,13 @@ static void pf_dl(module_id_t module_id,
                                     0 /* tb_scaling */,
                                     sched_pdsch->nrOfLayers) >> 3;
       float coeff_ue = (float) tbs / UE->dl_thr_ue;
+
+      // Apply NSSAI specific scheduling coefficients
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        coeff_ue = coeff_ue * get_nssai_sched_coeff(c->nssai.sst);
+      }
+
       LOG_D(NR_MAC, "[UE %04x][%4d.%2d] b %d, thr_ue %f, tbs %d, coeff_ue %f\n",
             UE->rnti,
             frame,
@@ -780,6 +822,13 @@ static void pf_dl(module_id_t module_id,
     int rbStart = 0; // WRT BWP start
     int rbStop = sched_pdsch->bwp_info.bwpSize - 1;
     int bwp_start = sched_pdsch->bwp_info.bwpStart;
+
+    if (iterator->UE->current_DL_BWP.dci_format == NR_DL_DCI_FORMAT_1_1) {
+      nssai_bwp_info_t nssai_bwp_info = get_pdsch_nssai_start_size(mac, iterator->UE);
+      rbStart = nssai_bwp_info.prb_start; // WRT BWP start
+      rbStop = nssai_bwp_info.prb_start + nssai_bwp_info.num_prbs - 1;
+    }
+
     // Freq-demain allocation
     while (rbStart < rbStop && (rballoc_mask[rbStart + bwp_start] & slbitmap))
       rbStart++;

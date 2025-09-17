@@ -129,7 +129,8 @@ typedef struct {
 
 typedef enum frequency_range_e {
   FR1 = 0,
-  FR2
+  FR2,
+  FR3 = FR2
 } frequency_range_t;
 
 typedef enum {

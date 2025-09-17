@@ -752,12 +752,24 @@ static bool transaction_ongoing(const gNB_RRC_UE_t *UE)
 
 /* \brief delays the ongoing transaction (in msg_p) by setting a timer to wait
  * 10ms; upon expiry, delivers to RRC, which sends the message to itself */
-static void delay_transaction(MessageDef *msg_p, int wait_us)
+static void delay_transaction(MessageDef *msg_p, int wait_us, MessagesIds message_id)
 {
-  MessageDef *new = itti_alloc_new_message(TASK_RRC_GNB, 0, NGAP_PDUSESSION_SETUP_REQ);
-  ngap_pdusession_setup_req_t *n = &NGAP_PDUSESSION_SETUP_REQ(new);
-  *n = NGAP_PDUSESSION_SETUP_REQ(msg_p);
-
+  MessageDef *new = itti_alloc_new_message(TASK_RRC_GNB, 0, message_id);
+  switch (message_id) {
+    case NGAP_PDUSESSION_SETUP_REQ: {
+      ngap_pdusession_setup_req_t *n = &NGAP_PDUSESSION_SETUP_REQ(new);
+      *n = NGAP_PDUSESSION_SETUP_REQ(msg_p);
+      break;
+    }
+    case NGAP_PDUSESSION_RELEASE_COMMAND: {
+      ngap_pdusession_release_command_t *n = &NGAP_PDUSESSION_RELEASE_COMMAND(new);
+      *n = NGAP_PDUSESSION_RELEASE_COMMAND(msg_p);
+      break;
+    }
+    default:
+      LOG_W(NR_RRC, "Delay transaction for message id %i is not handled yet\n", message_id);
+      return;
+  }
   int instance = msg_p->ittiMsgHeader.originInstance;
   long timer_id;
   timer_setup(0, wait_us, TASK_RRC_GNB, instance, TIMER_ONE_SHOT, new, &timer_id);
@@ -842,15 +854,15 @@ void rrc_gNB_process_NGAP_PDUSESSION_SETUP_REQ(MessageDef *msg_p, instance_t ins
    * To still allow these requests to come in and succeed, we below check and delay transactions
    * for 10ms. However, to not accidentally end up in infinite loops, the
    * maximum number is capped on a per-UE basis as indicated in variable
-   * max_delays_pdu_session. */
-  if (!UE->ongoing_pdusession_setup_request)
-    UE->max_delays_pdu_session = 100;
+   * max_delays_transaction. */
+  if (!UE->ongoing_transaction)
+    UE->max_delays_transaction = 100;
 
-  if (UE->max_delays_pdu_session > 0 && (transaction_ongoing(UE) || UE->ongoing_pdusession_setup_request)) {
+  if (UE->max_delays_transaction > 0 && (transaction_ongoing(UE) || UE->ongoing_transaction)) {
     int wait_us = 10000;
-    LOG_I(RRC, "UE %d: delay PDU session setup by %d us, pending %d retries\n", UE->rrc_ue_id, wait_us, UE->max_delays_pdu_session);
-    delay_transaction(msg_p, wait_us);
-    UE->max_delays_pdu_session--;
+    LOG_I(RRC, "UE %d: delay PDU session setup by %d us, pending %d retries\n", UE->rrc_ue_id, wait_us, UE->max_delays_transaction);
+    delay_transaction(msg_p, wait_us, NGAP_PDUSESSION_SETUP_REQ);
+    UE->max_delays_transaction--;
     return;
   }
 
@@ -867,7 +879,7 @@ void rrc_gNB_process_NGAP_PDUSESSION_SETUP_REQ(MessageDef *msg_p, instance_t ins
     send_ngap_pdu_session_setup_resp_fail(instance, msg, cause);
     rrc_forward_ue_nas_message(rrc, UE);
   } else {
-    UE->ongoing_pdusession_setup_request = true;
+    UE->ongoing_transaction = true;
   }
 }
 
@@ -1232,7 +1244,7 @@ void rrc_gNB_send_NGAP_PDUSESSION_RELEASE_RESPONSE(gNB_RRC_INST *rrc, gNB_RRC_UE
  * upon reception the NG-RAN node shall execute the release of the requested PDU sessions.
  * For each PDU session to be released the NG-RAN node shall release the corresponding
  * resources over Uu and over NG, if any. */
-int rrc_gNB_process_NGAP_PDUSESSION_RELEASE_COMMAND(ngap_pdusession_release_command_t *cmd, gNB_RRC_INST *rrc)
+int rrc_gNB_process_NGAP_PDUSESSION_RELEASE_COMMAND(ngap_pdusession_release_command_t *cmd, gNB_RRC_INST *rrc, MessageDef *msg_p)
 {
   uint32_t gNB_ue_ngap_id = cmd->gNB_ue_ngap_id;
   rrc_gNB_ue_context_t *ue_context_p = rrc_gNB_get_ue_context(rrc, gNB_ue_ngap_id);
@@ -1243,6 +1255,32 @@ int rrc_gNB_process_NGAP_PDUSESSION_RELEASE_COMMAND(ngap_pdusession_release_comm
   }
 
   gNB_RRC_UE_t *UE = &ue_context_p->ue_context;
+
+  /* This is a hack. We observed that with some UEs, PDU session requests might
+   * come in quick succession, faster than the RRC reconfiguration for the PDU
+   * session requests can be carried out (UE is doing reconfig, and second PDU
+   * session request arrives). We don't have currently the means to "queue up"
+   * these transactions, which would probably involve some rework of the RRC.
+   * To still allow these requests to come in and succeed, we below check and delay transactions
+   * for 10ms. However, to not accidentally end up in infinite loops, the
+   * maximum number is capped on a per-UE basis as indicated in variable
+   * max_delays_transaction. */
+  if (!UE->ongoing_transaction)
+    UE->max_delays_transaction = 100;
+
+  if (UE->max_delays_transaction > 0 && (transaction_ongoing(UE) || UE->ongoing_transaction)) {
+    int wait_us = 10000;
+    LOG_I(RRC,
+          "UE %d: delay PDU session release by %d us, pending %d retries\n",
+          UE->rrc_ue_id,
+          wait_us,
+          UE->max_delays_transaction);
+
+    delay_transaction(msg_p, wait_us, NGAP_PDUSESSION_RELEASE_COMMAND);
+    UE->max_delays_transaction--;
+    return -1;
+  }
+
   LOG_I(NR_RRC, "NG PDU Session Release command: AMF_UE_NGAP_ID=%lu, rrc_ue_id=%u, nb_pdusessions_torelease=%d \n",
         cmd->amf_ue_ngap_id,
         gNB_ue_ngap_id,
@@ -1278,6 +1316,7 @@ int rrc_gNB_process_NGAP_PDUSESSION_RELEASE_COMMAND(ngap_pdusession_release_comm
       sctp_assoc_t assoc_id = get_existing_cuup_for_ue(rrc, UE);
       rrc->cucp_cuup.bearer_context_mod(assoc_id, &req);
     }
+    UE->ongoing_transaction = true;
     rrc_gNB_generate_dedicatedRRCReconfiguration_release(rrc, UE, xid, cmd->nas_pdu.len, cmd->nas_pdu.buf);
   }
   return 0;

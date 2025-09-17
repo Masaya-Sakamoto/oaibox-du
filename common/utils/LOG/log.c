@@ -48,6 +48,13 @@
 #include <stdatomic.h>
 #include "common/utils/LOG/log.h"
 
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
 #define LOG_MEM_SIZE 100*1024*1024
 
 // main log variables
@@ -491,6 +498,12 @@ int isLogInitDone (void)
   return 1;
 }
 
+// OAIBOX LOG export
+#define OAIBOX_LOG_EXPORT_ADDRESS "127.0.0.1"
+#define OAIBOX_LOG_EXPORT_PORT 63137
+int oaibox_log_export_sockfd;
+struct sockaddr_in oaibox_log_export_servaddr;
+
 int logInit (void)
 {
   g_log = calloc(1, sizeof(log_t));
@@ -518,6 +531,17 @@ int logInit (void)
           "Invalid log options: time, wall_clock and utc_time are mutually exclusive\n");
 
   g_log->flag =  g_log->flag | FLAG_INITIALIZED;
+
+  LOG_I(GNB_APP, "OAIBOX: initializing LOG export\n");
+  if ((oaibox_log_export_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    LOG_E(GNB_APP, "OAIBOX: socket creation failed\n");
+    exit(EXIT_FAILURE);
+  }
+  memset(&oaibox_log_export_servaddr, 0, sizeof(oaibox_log_export_servaddr));
+  oaibox_log_export_servaddr.sin_family = AF_INET;
+  oaibox_log_export_servaddr.sin_port = htons(OAIBOX_LOG_EXPORT_PORT);
+  oaibox_log_export_servaddr.sin_addr.s_addr = inet_addr(OAIBOX_LOG_EXPORT_ADDRESS);
+
   return 0;
 }
 
@@ -956,6 +980,12 @@ static void log_output_memory(log_component_t *c, const char *file, const char *
   }else{
     AssertFatal(len >= 0 && len <= sizeof(log_buffer), "Bad len %d\n", len);
     if (write(fileno(c->stream), log_buffer, len)) {};
+    sendto(oaibox_log_export_sockfd,
+           log_buffer,
+           len,
+           MSG_DONTWAIT | MSG_NOSIGNAL, // MSG_CONFIRM,
+           (const struct sockaddr *)&oaibox_log_export_servaddr,
+           sizeof(oaibox_log_export_servaddr));
   }
 }
 

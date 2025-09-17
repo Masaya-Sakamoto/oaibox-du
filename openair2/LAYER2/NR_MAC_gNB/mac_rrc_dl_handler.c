@@ -783,6 +783,21 @@ void ue_context_modification_request(const f1ap_ue_context_mod_req_t *req)
     // we re-configure the BWP to apply the CellGroup and to use UE specific Search Space with DCIX1
     configure_UE_BWP(mac, scc, UE, false, NR_SearchSpace__searchSpaceType_PR_ue_Specific, -1, -1);
     nr_mac_clean_cellgroup(UE->CellGroup);
+  } else {
+    LOG_I(NR_MAC, "UE %04x: DU received a RRCReconfiguration\n", UE->rnti);
+    if (UE->reconfigSpCellConfig) {
+      // in case of reestablishment, the spCellConfig had to be released
+      // temporarily. Reapply now before doing the reconfiguration.
+      UE->CellGroup->spCellConfig = UE->reconfigSpCellConfig;
+      UE->reconfigSpCellConfig = NULL;
+      for (int i = 1; i < seq_arr_size(&UE->UE_sched_ctrl.lc_config); ++i) {
+        nr_lc_config_t *c = seq_arr_at(&UE->UE_sched_ctrl.lc_config, i);
+        c->suspended = false;
+        nr_rlc_reestablish_entity(req->gNB_DU_ue_id, c->lcid);
+      }
+    }
+    int delay = nr_mac_get_reconfig_delay_slots(UE->current_UL_BWP.scs);
+    nr_mac_interrupt_ue_transmission(mac, UE, FOLLOW_INSYNC_RECONFIG, delay);
   }
 
   if (ue_cap != NULL) {

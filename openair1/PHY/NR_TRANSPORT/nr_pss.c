@@ -24,11 +24,13 @@
 
 //#define NR_PSS_DEBUG
 
-int nr_generate_pss(  c16_t *txdataF,
-                      int16_t amp,
-                      uint8_t ssb_start_symbol,
-                      nfapi_nr_config_request_scf_t* config,
-                      NR_DL_FRAME_PARMS *frame_parms)
+int nr_generate_pss(c16_t **txdataF,
+                    int txdataF_offset,
+                    int16_t amp,
+                    uint8_t ssb_start_symbol,
+                    nfapi_nr_config_request_scf_t *config,
+                    NR_DL_FRAME_PARMS *frame_parms,
+                    c16_t *w)
 {
   int16_t x[NR_PSS_LENGTH];
   const int x_initial[7] = {0, 1, 1 , 0, 1, 1, 1};
@@ -59,7 +61,11 @@ int nr_generate_pss(  c16_t *txdataF,
     int m = (i + 43*Nid2)%(NR_PSS_LENGTH);
     int16_t d_pss = (1 - 2*x[m]) * 23170;
     //      printf("pss: writing position k %d / %d\n",k,frame_parms->ofdm_symbol_size);
-    ((int16_t*)txdataF)[2*(l*frame_parms->ofdm_symbol_size + k)] = (((int16_t)amp) * d_pss) >> 15;
+    for (int atx = 0; atx < frame_parms->nb_antennas_tx; atx++) {
+      c16_t *txF = &txdataF[atx][txdataF_offset];
+      c16_t d = {(((int16_t)amp) * d_pss) >> 15, 0};
+      txF[l * frame_parms->ofdm_symbol_size + k] = c16mulShift(d, w[atx], 14);
+    }
     k++;
 
     if (k >= frame_parms->ofdm_symbol_size)

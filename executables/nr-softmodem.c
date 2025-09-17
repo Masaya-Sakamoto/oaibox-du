@@ -468,12 +468,14 @@ static  void wait_nfapi_init(char *thread_name)
 #ifdef E2_AGENT
 static void initialize_agent(ngran_node_t node_type, e2_agent_args_t oai_args)
 {
-  AssertFatal(oai_args.sm_dir != NULL , "Please, specify the directory where the SMs are located in the config file, i.e., add in config file the next line: e2_agent = {near_ric_ip_addr = \"127.0.0.1\"; sm_dir = \"/usr/local/lib/flexric/\");} ");
-  AssertFatal(oai_args.ip != NULL , "Please, specify the IP address of the nearRT-RIC in the config file, i.e., e2_agent = {near_ric_ip_addr = \"127.0.0.1\"; sm_dir = \"/usr/local/lib/flexric/\"");
+  const char* conf_example_msg = "i.e., add in config file the following line:  e2_agent = {near_ric_ip_addr = \"127.0.0.1\"; local_ip_addr = \"127.0.0.1\"; sm_dir = \"/usr/local/lib/flexric/\");} ";
+  AssertFatal(oai_args.sm_dir != NULL , "Please, specify the directory where the SMs are located in the config file, %s", conf_example_msg);
+  AssertFatal(oai_args.server_ip != NULL , "Please, specify the IP address of the nearRT-RIC in the config file, %s", conf_example_msg);
+  AssertFatal(oai_args.client_ip != NULL , "Please, specify the local IP address to connect ot the nearRT-RIC in the config file, %s", conf_example_msg);
 
-  printf("After RCconfig_NR_E2agent %s %s \n",oai_args.sm_dir, oai_args.ip  );
+  printf("After RCconfig_NR_E2agent %s %s %s\n",oai_args.sm_dir, oai_args.server_ip , oai_args.client_ip );
 
-  fr_args_t args = { .ip = oai_args.ip }; // init_fr_args(0, NULL);
+  fr_args_t args = { .server_ip = oai_args.server_ip , .client_ip = oai_args.client_ip }; // init_fr_args(0, NULL);
   memcpy(args.libs_dir, oai_args.sm_dir, 128);
 
   sleep(1);
@@ -504,7 +506,7 @@ static void initialize_agent(ngran_node_t node_type, e2_agent_args_t oai_args)
 
   printf("[E2 NODE]: mcc = %d mnc = %d mnc_digit = %d nb_id = %d \n", mcc, mnc, mnc_digit_len, nb_id);
 
-  printf("[E2 NODE]: Args %s %s \n", args.ip, args.libs_dir);
+  printf("[E2 NODE]: Args Server IP: %s Client IP: %s  Libs Dir %s \n", args.server_ip, args.client_ip, args.libs_dir);
 
   sm_io_ag_ran_t io = init_ran_func_ag();
   init_agent_api(mcc, mnc, mnc_digit_len, nb_id, cu_du_id, node_type, io, &args);

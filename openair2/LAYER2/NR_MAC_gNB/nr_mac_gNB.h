@@ -761,7 +761,7 @@ typedef struct measgap_config {
   int mgl_slots;
 } measgap_config_t;
 
-typedef enum interrupt_followup_action { FOLLOW_INSYNC, FOLLOW_OUTOFSYNC } interrupt_followup_action_t;
+typedef enum interrupt_followup_action { FOLLOW_INSYNC, FOLLOW_OUTOFSYNC, FOLLOW_INSYNC_RECONFIG } interrupt_followup_action_t;
 
 /*! \brief UE list used by gNB to order UEs/CC for scheduling*/
 typedef struct {
@@ -860,6 +860,13 @@ typedef struct fsn {
   frame_t f;
   slot_t s;
 } fsn_t;
+
+typedef struct nssai_config_t {
+  uint8_t sst;
+  uint32_t sd;
+  uint16_t prb_start;
+  uint16_t num_prbs;
+} nssai_config_t;
 
 /*! \brief top level eNB MAC structure */
 typedef struct gNB_MAC_INST_s {
@@ -971,6 +978,9 @@ typedef struct gNB_MAC_INST_s {
   nr_mac_rrc_ul_if_t mac_rrc;
   f1_config_t f1_config;
   int16_t frame;
+  int16_t slot;
+  seq_arr_t nssai_config_dl;
+  seq_arr_t nssai_config_ul;
 
   pthread_mutex_t sched_lock;
 

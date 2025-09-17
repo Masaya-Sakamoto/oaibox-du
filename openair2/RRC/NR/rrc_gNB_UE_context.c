@@ -122,6 +122,19 @@ rrc_gNB_ue_context_t *rrc_gNB_get_ue_context_by_rnti_any_du(gNB_RRC_INST *rrc_in
   return NULL;
 }
 
+rrc_gNB_ue_context_t *rrc_gNB_get_ue_context_by_amf_ue_ngap_id(gNB_RRC_INST *rrc, uint64_t amf_ue_ngap_id)
+{
+  rrc_gNB_ue_context_t *ue_context_p;
+  RB_FOREACH (ue_context_p, rrc_nr_ue_tree_s, &(rrc->rrc_ue_head)) {
+    gNB_RRC_UE_t *ue = &ue_context_p->ue_context;
+    if (ue->amf_ue_ngap_id == amf_ue_ngap_id) {
+      return ue_context_p;
+    }
+  }
+  LOG_W(NR_RRC, "search by amf_ue_ngap_id not found %ld\n", amf_ue_ngap_id);
+  return NULL;
+}
+
 void rrc_gNB_free_mem_ue_context(rrc_gNB_ue_context_t *const ue_context_pP)
 //-----------------------------------------------------------------------------
 {
@@ -206,8 +219,8 @@ rrc_gNB_ue_context_t *rrc_gNB_create_ue_context(sctp_assoc_t assoc_id,
               ue->rrc_ue_id);
   bool success = cu_add_f1_ue_data(ue->rrc_ue_id, &ue_data);
   DevAssert(success);
-  ue->max_delays_pdu_session = 20; /* see rrc_gNB_process_NGAP_PDUSESSION_SETUP_REQ() */
-  ue->ongoing_pdusession_setup_request = false;
+  ue->max_delays_transaction = 100;
+  ue->ongoing_transaction = false;
 
   // Initialise setup PDU Sessions list
   seq_arr_init(&ue->pduSessions, sizeof(rrc_pdu_session_param_t));

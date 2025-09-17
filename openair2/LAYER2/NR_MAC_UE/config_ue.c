@@ -465,7 +465,7 @@ static void config_common_ue(NR_UE_MAC_INST_t *mac, NR_ServingCellConfigCommon_t
     int scs_scaling = 1 << (cfg->ssb_config.scs_common);
     if (frequencyInfoDL->absoluteFrequencyPointA < 600000)
       scs_scaling = scs_scaling * 3;
-    if (frequencyInfoDL->absoluteFrequencyPointA > 2016666)
+    if (get_freq_range_from_arfcn(frequencyInfoDL->absoluteFrequencyPointA) == FR2)
       scs_scaling = scs_scaling >> 2;
     uint32_t absolute_diff = (*frequencyInfoDL->absoluteFrequencySSB - frequencyInfoDL->absoluteFrequencyPointA);
     cfg->ssb_table.ssb_offset_point_a = absolute_diff / (12 * scs_scaling) - 10;

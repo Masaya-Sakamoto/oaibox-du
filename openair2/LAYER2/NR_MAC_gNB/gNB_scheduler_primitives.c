@@ -796,6 +796,41 @@ NR_pusch_dmrs_t get_ul_dmrs_params(const NR_ServingCellConfigCommon_t *scc,
   return dmrs;
 }
 
+float get_nssai_sched_coeff(uint8_t sst)
+{
+  float nssai_coeff = 1.0;
+  switch (sst) {
+    case 0: // NULL
+      nssai_coeff = 1.0;
+      break;
+    case 1: // eMBB: enhanced Mobile Broadband
+      nssai_coeff = 1.0;
+      break;
+    case 2: // URLLC: ultra-reliable low latency communications
+      nssai_coeff = 1000.0;
+      break;
+    case 3: // MIoT: massive IoT
+      nssai_coeff = 100.0;
+      break;
+    case 4: // V2X: V2X services
+      nssai_coeff = 50.0;
+      break;
+    case 5: // HMTC: High-Performance Machine-Type Communications
+      nssai_coeff = 40.0;
+      break;
+    case 6: // HDLLC: High Data rate and Low Latency Communications
+      nssai_coeff = 30.0;
+      break;
+    case 7: // GBRSS: Guaranteed Bit Rate Streaming Service
+      nssai_coeff = 20.0;
+      break;
+    default:
+      AssertFatal(false, "SST %d not handled yet in MAC scheduler!\n", sst);
+      break;
+  }
+  return nssai_coeff;
+}
+
 #define BLER_UPDATE_FRAME 10
 #define BLER_FILTER 0.9f
 int get_mcs_from_bler(const NR_bler_options_t *bler_options,
@@ -2504,8 +2539,11 @@ NR_UE_info_t *find_ra_UE(NR_UEs_t *UEs, rnti_t rntiP)
 void delete_nr_ue_data(NR_UE_info_t *UE, NR_COMMON_channels_t *ccPtr, uid_allocator_t *uia)
 {
   ASN_STRUCT_FREE(asn_DEF_NR_CellGroupConfig, UE->CellGroup);
+  UE->CellGroup = NULL;
   ASN_STRUCT_FREE(asn_DEF_NR_SpCellConfig, UE->reconfigSpCellConfig);
+  UE->reconfigSpCellConfig = NULL;
   ASN_STRUCT_FREE(asn_DEF_NR_UE_NR_Capability, UE->capability);
+  UE->capability = NULL;
   NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
   seq_arr_free(&sched_ctrl->lc_config, NULL);
   destroy_nr_list(&sched_ctrl->available_dl_harq);
@@ -3641,9 +3679,20 @@ void nr_mac_update_timers(module_id_t module_id, frame_t frame, slot_t slot)
     if (nr_timer_tick(&sched_ctrl->transm_interrupt)) {
       /* expired */
       nr_timer_stop(&sched_ctrl->transm_interrupt);
-      if (UE->interrupt_action == FOLLOW_OUTOFSYNC)
-        nr_mac_trigger_ul_failure(sched_ctrl, UE->current_DL_BWP.scs);
-      /* else: default FOLLOW_INSYNC: nothing to do (UE is now active again) */
+      switch (UE->interrupt_action) {
+        case FOLLOW_INSYNC:
+          nr_mac_reset_ul_failure(sched_ctrl);
+          break;
+        case FOLLOW_OUTOFSYNC:
+          nr_mac_trigger_ul_failure(sched_ctrl, UE->current_DL_BWP.scs);
+          break;
+        case FOLLOW_INSYNC_RECONFIG: {
+          NR_ServingCellConfigCommon_t *scc = mac->common_channels[0].ServingCellConfigCommon;
+          configure_UE_BWP(mac, scc, UE, false, NR_SearchSpace__searchSpaceType_PR_common, -1, -1);
+        } break;
+        default:
+          break;
+      }
     }
   }
 }
@@ -4091,5 +4140,45 @@ void nr_mac_update_pdcch_closed_loop_adjust(NR_UE_sched_ctrl_t *sched_ctrl, bool
     sched_ctrl->pdcch_cl_adjust = min(1, sched_ctrl->pdcch_cl_adjust + 0.05);
   } else {
     sched_ctrl->pdcch_cl_adjust = max(0, sched_ctrl->pdcch_cl_adjust - 0.01);
+  }
+}
+
+void nr_bwp_switching(module_id_t module_id, uint32_t ran_ue_id, int bwp_id)
+{
+  gNB_MAC_INST *mac = RC.nrmac[module_id];
+  NR_UEs_t *UE_info = &mac->UE_info;
+
+  UE_iterator (UE_info->connected_ue_list, UE) {
+    if (du_exists_f1_ue_data(UE->rnti)) {
+      const f1_ue_data_t ued = du_get_f1_ue_data(UE->rnti);
+      if (ran_ue_id == ued.secondary_ue) {
+        NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+
+        if (nr_timer_is_active(&sched_ctrl->transm_interrupt) || mac->radio_config.num_additional_bwps == 0) {
+          break;
+        }
+
+        LOG_I(NR_MAC,
+              "BWP switching for UE 0x%04x from BWP %ld to %d, triggering RRC Reconfiguration\n",
+              UE->rnti,
+              UE->current_DL_BWP.bwp_id,
+              bwp_id);
+
+        // Trigger RRC Reconfiguration
+        nr_mac_trigger_reconfiguration(mac, UE, bwp_id);
+
+        configure_UE_BWP(mac,
+                         mac->common_channels[0].ServingCellConfigCommon,
+                         UE,
+                         false,
+                         NR_SearchSpace__searchSpaceType_PR_common,
+                         UE->current_DL_BWP.bwp_id,
+                         UE->current_UL_BWP.bwp_id);
+
+        // int delay = nr_mac_get_reconfig_delay_slots(UE->current_DL_BWP.scs);
+        // nr_mac_interrupt_ue_transmission(mac, UE, FOLLOW_INSYNC_RECONFIG, delay);
+        break;
+      }
+    }
   }
 }
