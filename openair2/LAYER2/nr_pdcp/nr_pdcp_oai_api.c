@@ -708,6 +708,19 @@ void nr_pdcp_add_drbs(eNB_flag_t enb_flag,
     LOG_W(PDCP, "nr_pdcp_add_drbs() with void list\n");
 }
 
+/** @brief Release all DRBs for @param pdusession_id */
+void nr_pdcp_release_drbs(ue_id_t ue_id, long pdusession_id)
+{
+  nr_pdcp_manager_lock(nr_pdcp_ue_manager);
+  nr_pdcp_ue_t *ue = nr_pdcp_manager_get_ue(nr_pdcp_ue_manager, ue_id);
+  for (int i = 0; i < MAX_DRBS_PER_UE; i++) {
+    const nr_pdcp_entity_t *drb = ue->drb[i];
+    if (drb && drb->pdusession_id == pdusession_id)
+      nr_pdcp_release_drb(ue_id, i + 1);
+  }
+  nr_pdcp_manager_unlock(nr_pdcp_ue_manager);
+}
+
 uint64_t get_pdcp_optmask(void)
 {
   return pdcp_optmask;

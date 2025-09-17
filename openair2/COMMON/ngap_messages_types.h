@@ -130,43 +130,6 @@ typedef struct ngap_ambr_s {
   bitrate_t br_dl;
 } ngap_ambr_t;
 
-typedef enum ngap_priority_level_s {
-  NGAP_PRIORITY_LEVEL_SPARE       = 0,
-  NGAP_PRIORITY_LEVEL_HIGHEST     = 1,
-  NGAP_PRIORITY_LEVEL_2           = 2,
-  NGAP_PRIORITY_LEVEL_3           = 3,
-  NGAP_PRIORITY_LEVEL_4           = 4,
-  NGAP_PRIORITY_LEVEL_5           = 5,
-  NGAP_PRIORITY_LEVEL_6           = 6,
-  NGAP_PRIORITY_LEVEL_7           = 7,
-  NGAP_PRIORITY_LEVEL_8           = 8,
-  NGAP_PRIORITY_LEVEL_9           = 9,
-  NGAP_PRIORITY_LEVEL_10          = 10,
-  NGAP_PRIORITY_LEVEL_11          = 11,
-  NGAP_PRIORITY_LEVEL_12          = 12,
-  NGAP_PRIORITY_LEVEL_13          = 13,
-  NGAP_PRIORITY_LEVEL_LOWEST      = 14,
-  NGAP_PRIORITY_LEVEL_NO_PRIORITY = 15
-} ngap_priority_level_t;
-
-typedef enum ngap_pre_emp_capability_e {
-  NGAP_PRE_EMPTION_CAPABILITY_SHALL_NOT_TRIGGER_PREEMPTION = 0,
-  NGAP_PRE_EMPTION_CAPABILITY_MAY_TRIGGER_PREEMPTION = 1,
-  NGAP_PRE_EMPTION_CAPABILITY_MAX,
-} ngap_pre_emp_capability_t;
-
-typedef enum ngap_pre_emp_vulnerability_e {
-  NGAP_PRE_EMPTION_VULNERABILITY_NOT_PREEMPTABLE = 0,
-  NGAP_PRE_EMPTION_VULNERABILITY_PREEMPTABLE = 1,
-  NGAP_PRE_EMPTION_VULNERABILITY_MAX,
-} ngap_pre_emp_vulnerability_t;
-
-typedef struct ngap_allocation_retention_priority_s {
-  ngap_priority_level_t        priority_level;
-  ngap_pre_emp_capability_t    pre_emp_capability;
-  ngap_pre_emp_vulnerability_t pre_emp_vulnerability;
-} ngap_allocation_retention_priority_t;
-
 typedef struct ngap_security_capabilities_s {
   uint16_t nRencryption_algorithms;
   uint16_t nRintegrity_algorithms;
@@ -193,14 +156,6 @@ typedef enum ngap_rrc_establishment_cause_e {
   NGAP_RRC_CAUSE_NOTAVAILABLE          = 0x10,
   NGAP_RRC_CAUSE_LAST
 } ngap_rrc_establishment_cause_t;
-
-typedef struct pdusession_level_qos_parameter_s {
-  uint8_t qfi;
-  uint64_t fiveQI;
-  uint64_t qos_priority;
-  fiveQI_t fiveQI_type;
-  ngap_allocation_retention_priority_t allocation_retention_priority;
-} pdusession_level_qos_parameter_t;
 
 typedef struct fiveg_s_tmsi_s {
   uint16_t amf_set_id;
@@ -252,7 +207,7 @@ typedef struct pdusession_setup_s {
   uint8_t  nb_of_qos_flow;
   
   /* qos flow list(1 ~ 64) */
-  pdusession_associate_qosflow_t associated_qos_flows[QOSFLOW_MAX_VALUE];
+  pdusession_associate_qosflow_t associated_qos_flows[MAX_QOS_FLOWS];
 } pdusession_setup_t;
 
 typedef struct qos_flow_tobe_modified_s {
@@ -266,7 +221,7 @@ typedef struct pdusession_modify_s {
   uint8_t nb_of_qos_flow;
 
   // qos_flow_add_or_modify
-  qos_flow_tobe_modified_t qos[QOSFLOW_MAX_VALUE];
+  qos_flow_tobe_modified_t qos[MAX_QOS_FLOWS];
 } pdusession_modify_t;
 
 /* Cause (9.3.1.2 of 3GPP TS 38.413) */
@@ -536,7 +491,7 @@ typedef struct ngap_downlink_nas_s {
 /* PDU Session Resource Setup Request Transfer (9.3.4.1 3GPP TS 38.413) */
 typedef struct {
   uint8_t nb_qos;
-  pdusession_level_qos_parameter_t qos[QOSFLOW_MAX_VALUE];
+  pdusession_level_qos_parameter_t qos[MAX_QOS_FLOWS];
   pdu_session_type_t pdu_session_type;
   // UPF endpoint of the NG-U (N3) transport bearer
   gtpu_tunnel_t n3_incoming;
@@ -718,23 +673,13 @@ typedef struct ngap_pdusession_release_command_s {
 } ngap_pdusession_release_command_t;
 
 typedef struct ngap_pdusession_release_resp_s {
-  /* AMF UE id  */
+  // AMF UE NGAP ID
   uint64_t amf_ue_ngap_id;
-
-  /* gNB ue ngap id as initialized by NGAP layer */
-  uint32_t             gNB_ue_ngap_id;
-
-  /* Number of pdusession released in the list */
-  uint8_t              nb_of_pdusessions_released;
-
-  /* list of pdusessions released */
+  // RAN UE NGAP ID
+  uint32_t gNB_ue_ngap_id;
+  // PDU Session Resource Released List
+  uint8_t nb_of_pdusessions_released;
   pdusession_release_t pdusession_release[NGAP_MAX_PDU_SESSION];
-
-  /* Number of pdusession failed to be released in list */
-  uint8_t              nb_of_pdusessions_failed;
-  /* list of pdusessions that failed to be released */
-  pdusession_failed_t  pdusessions_failed[NGAP_MAX_PDU_SESSION];
-
 } ngap_pdusession_release_resp_t;
 
 #endif /* NGAP_MESSAGES_TYPES_H_ */

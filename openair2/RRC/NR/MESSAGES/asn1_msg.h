@@ -51,17 +51,22 @@
 #include "NR_SRB-ToAddModList.h"
 #include "NR_SecurityConfig.h"
 #include "NR_MeasurementTimingConfiguration.h"
+#include "NR_SDAP-Config.h"
+#include "NR_asn_constant.h"
 #include "ds/seq_arr.h"
 #include "ds/byte_array.h"
 #include "rrc_messages_types.h"
 #include "openair2/LAYER2/nr_pdcp/nr_pdcp_configuration.h"
+#include "openair2/SDAP/nr_sdap/nr_sdap_configuration.h"
+
 struct asn_TYPE_descriptor_s;
 
 typedef struct {
   uint8_t transaction_id;
   NR_SRB_ToAddModList_t *srb_config_list;
   NR_DRB_ToAddModList_t *drb_config_list;
-  NR_DRB_ToReleaseList_t *drb_release_list;
+  int *drb_rel;
+  int n_drb_rel;
   NR_SecurityConfig_t *security_config;
   NR_MeasConfig_t *meas_config;
   byte_array_t dedicated_NAS_msg_list[MAX_DRBS_PER_UE];
@@ -84,12 +89,6 @@ int xer_sprint_NR(char *string, size_t string_size, struct asn_TYPE_descriptor_s
 int do_SIB2_NR(uint8_t **msg_SIB2, NR_SSB_MTC_t *ssbmtc);
 
 int do_RRCReject(uint8_t *const buffer);
-
-NR_RadioBearerConfig_t *get_default_rbconfig(int eps_bearer_id,
-                                             int rb_id,
-                                             e_NR_CipheringAlgorithm ciphering_algorithm,
-                                             e_NR_SecurityConfig__keyToUse key_to_use,
-                                             const nr_pdcp_configuration_t *pdcp_config);
 
 int do_RRCSetup(uint8_t *const buffer,
                 size_t buffer_size,

@@ -37,6 +37,7 @@
 #include "openair2/LAYER2/NR_MAC_UE/mac_defs.h"
 #include "openair2/LAYER2/NR_MAC_UE/mac_proto.h"
 #include "openair2/RRC/NR_UE/rrc_proto.h"
+#include "openair3/NAS/NR_UE/nr_nas_msg.h"
 
 #define TELNETSERVERCODE
 #include "telnetsrv.h"
@@ -49,6 +50,14 @@ const char* NR_UE_L2_STATE_STR[] = {
   NR_UE_L2_STATES
 #undef UE_STATE
 };
+
+static int get_default_ue_id(void)
+{
+  NR_UE_RRC_INST_t *rrc = get_NR_UE_rrc_inst(0);
+  if (!rrc)
+    return -1;
+  return rrc->ue_id;
+}
 
 /**
  * Get the synchronization state of a UE.
@@ -110,6 +119,41 @@ static int force_deregistration(char *buf, int debug, telnet_printfunc_t prnt)
   return 0;
 }
 
+static int add_pdu_session(char *buf, int debug, telnet_printfunc_t prnt)
+{
+  int ue_id = -1;
+  int pdusession_id = -1;
+
+  if (!buf) {
+    ERROR_MSG_RET("Missing argument: expected [UE_ID(optional)],PDUSessionID\n");
+  }
+
+  // Try parsing two values: "UE_ID,PDUSessionID"
+  int n = sscanf(buf, "%d,%d", &ue_id, &pdusession_id);
+  if (n == 1) {
+    // Only PDUSessionID provided, fetch default UE ID
+    pdusession_id = ue_id;
+    ue_id = get_default_ue_id();
+    if (ue_id < 0)
+      ERROR_MSG_RET("No default UE context found\n");
+  } else if (n != 2) {
+    ERROR_MSG_RET("Invalid format: expected [UE_ID,]PDUSessionID\n");
+  }
+
+  if (ue_id < 0)
+    ERROR_MSG_RET("UE_ID must be >= 0\n");
+  if (pdusession_id < 0 || pdusession_id > 255)
+    ERROR_MSG_RET("PDUSessionID must be in range [0,255]\n");
+
+  nr_ue_nas_t *nas = get_ue_nas_info(ue_id);
+  if (!nas)
+    ERROR_MSG_RET("No NAS context found for UE_ID %d\n", ue_id);
+
+  request_pdusession(nas, pdusession_id);
+  prnt("Triggered PDU session request for UE %d with ID %d\n", ue_id, pdusession_id);
+  return 0;
+}
+
 /* Telnet shell command definitions */
 static telnetshell_cmddef_t cicmds[] = {
   {"sync_state", "[UE_ID(int,opt)]", get_sync_state},
@@ -117,6 +161,7 @@ static telnetshell_cmddef_t cicmds[] = {
   {"force_RRC_IDLE", "", force_RRC_IDLE},
   {"force_crnti_ra", "", force_crnti_ra},
   {"deregistration", "", force_deregistration},
+  {"add_pdu_session", "[UE_ID(int,opt)],[int,PDUSessionID]", add_pdu_session},
   {"", "", NULL},
 };
 
