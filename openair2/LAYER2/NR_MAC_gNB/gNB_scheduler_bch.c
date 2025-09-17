@@ -274,9 +274,7 @@ void schedule_nr_mib(module_id_t module_idP, frame_t frameP, slot_t slotP, nfapi
   }
 }
 
-static uint32_t get_tbs_bch(NR_sched_pdsch_t *pdsch,
-                            uint32_t num_total_bytes,
-                            uint16_t *vrb_map)
+static uint32_t get_tbs_bch(NR_sched_pdsch_t *pdsch, uint32_t num_total_bytes, uint16_t *vrb_map)
 {
   NR_tda_info_t *tda_info = &pdsch->tda_info;
 
@@ -318,13 +316,15 @@ static uint32_t get_tbs_bch(NR_sched_pdsch_t *pdsch,
       break;
     }
   }
-  AssertFatal(TBS >= num_total_bytes,
-              "Couldn't allocate enough resources for %d bytes in SIB PDSCH (rbStart %d, rbSize %d, bwpSize %d)\n",
-              num_total_bytes,
-              rbStart,
-              rbSize,
-              bwpSize);
-
+  if (TBS < num_total_bytes) {
+    LOG_D(NR_MAC,
+          "Couldn't allocate enough resources for %d bytes in SIB PDSCH (rbStart %d, rbSize %d, bwpSize %d)\n",
+          num_total_bytes,
+          rbStart,
+          rbSize,
+          bwpSize);
+    return 0;
+  }
   pdsch->rbSize = rbSize;
   pdsch->rbStart = rbStart;
 
@@ -367,11 +367,12 @@ static uint32_t schedule_control_sib1(gNB_MAC_INST *gNB_mac,
 
   uint8_t nr_of_candidates = 0;
 
-  for (int i=0; i<3; i++) {
+  for (int i = 0; i < 3; i++) {
     find_aggregation_candidates(&gNB_mac->sched_ctrlCommon->aggregation_level, &nr_of_candidates, gNB_mac->sched_ctrlCommon->search_space,4<<i);
-    if (nr_of_candidates>0) break; // choosing the lower value of aggregation level available
+    if (nr_of_candidates > 0)
+      break; // choosing the lower value of aggregation level available
   }
-  AssertFatal(nr_of_candidates>0,"nr_of_candidates is 0\n");
+  AssertFatal(nr_of_candidates > 0, "nr_of_candidates is 0\n");
   gNB_mac->sched_ctrlCommon->cce_index = find_pdcch_candidate(gNB_mac,
                                                               CC_id,
                                                               gNB_mac->sched_ctrlCommon->aggregation_level,
@@ -383,9 +384,9 @@ static uint32_t schedule_control_sib1(gNB_MAC_INST *gNB_mac,
 
   AssertFatal(gNB_mac->sched_ctrlCommon->cce_index >= 0, "Could not find CCE for coreset0\n");
 
-  uint32_t TBS = get_tbs_bch(&gNB_mac->sched_ctrlCommon->sched_pdsch,
-                             gNB_mac->sched_ctrlCommon->num_total_bytes,
-                             vrb_map);
+  uint32_t TBS = get_tbs_bch(&gNB_mac->sched_ctrlCommon->sched_pdsch, gNB_mac->sched_ctrlCommon->num_total_bytes, vrb_map);
+  if (TBS == 0)
+    return 0;
 
   pdsch->R = nr_get_code_rate_dl(pdsch->mcs, 0);
   pdsch->Qm = nr_get_Qm_dl(pdsch->mcs, 0);
@@ -519,12 +520,8 @@ void schedule_nr_sib1(module_id_t module_idP,
   // TODO: Get these values from RRC
   const int CC_id = 0;
   uint8_t candidate_idx = 0;
-
   gNB_MAC_INST *gNB_mac = RC.nrmac[module_idP];
   NR_ServingCellConfigCommon_t *scc = gNB_mac->common_channels[CC_id].ServingCellConfigCommon;
-
-  int time_domain_allocation = gNB_mac->radio_config.sib1_tda;
-
   int L_max;
   switch (scc->ssb_PositionsInBurst->present) {
     case 1:
@@ -537,8 +534,7 @@ void schedule_nr_sib1(module_id_t module_idP,
       L_max = 64;
       break;
     default:
-      AssertFatal(0,"SSB bitmap size value %d undefined (allowed values 1,2,3)\n",
-                  scc->ssb_PositionsInBurst->present);
+      AssertFatal(false, "SSB bitmap size value %d undefined (allowed values 1,2,3)\n", scc->ssb_PositionsInBurst->present);
   }
 
   for (int i = 0; i < L_max; i++) {
@@ -557,38 +553,48 @@ void schedule_nr_sib1(module_id_t module_idP,
       int beam_index = get_fapi_beamforming_index(gNB_mac, i);
       NR_beam_alloc_t beam = beam_allocation_procedure(&gNB_mac->beam_info, frameP, slotP, beam_index, n_slots_frame);
       AssertFatal(beam.idx >= 0, "Cannot allocate SIB1 corresponding to SSB %d in any available beam\n", i);
+      NR_COMMON_channels_t *cc = &gNB_mac->common_channels[0];
       LOG_D(NR_MAC,"(%d.%d) SIB1 transmission: ssb_index %d\n", frameP, slotP, type0_PDCCH_CSS_config->ssb_index);
-
       default_table_type_t table_type = get_default_table_type(type0_PDCCH_CSS_config->type0_pdcch_ss_mux_pattern);
-      // assuming normal CP
-      NR_tda_info_t tda_info = get_info_from_tda_tables(table_type, time_domain_allocation, scc->dmrs_TypeA_Position, true);
-
-      AssertFatal((tda_info.startSymbolIndex + tda_info.nrOfSymbols) < 14,
-                   "SIB1 TDA %d would cause overlap with CSI-RS. Please select a different SIB1 TDA.\n",
-                   time_domain_allocation);
-
-      NR_pdsch_dmrs_t dmrs_parms = get_dl_dmrs_params(scc, NULL, &tda_info, 1);
-
       NR_sched_pdcch_t sched_pdcch = set_pdcch_structure(NULL,
                                                          gNB_mac->sched_ctrlCommon->search_space,
                                                          gNB_mac->sched_ctrlCommon->coreset,
                                                          scc,
                                                          NULL,
                                                          type0_PDCCH_CSS_config);
+      int time_domain_allocation = -1;
+      uint32_t TBS = 0;
+      for (int t = 0; t < 16; t++) {
+        //If the PDSCH was scheduled with SI-RNTI in PDCCH Type0 common search space,
+        // the UE may assume that this PDSCH resource allocation is not applied (Table 5.1.2.1.1-4 and 5)
+        if (table_type == defaultB && (t == 12 || t == 13 || t == 14))
+          continue;
+        if (table_type == defaultC && (t == 1 || t == 6 || t == 13 || t == 14 || t == 15 || t == 16))
+          continue;
+        // assuming normal CP
+        NR_tda_info_t tda_info = get_info_from_tda_tables(table_type, t, scc->dmrs_TypeA_Position, true);
+        // SIB1 TDA going to the last symbol would cause overlap with CSI-RS
+        if (!tda_info.valid_tda || tda_info.startSymbolIndex + tda_info.nrOfSymbols == 14)
+          continue;
 
-      NR_COMMON_channels_t *cc = &gNB_mac->common_channels[0];
-      // Configure sched_ctrlCommon for SIB1
-      uint32_t TBS = schedule_control_sib1(gNB_mac,
-                                           CC_id,
-                                           &sched_pdcch,
-                                           type0_PDCCH_CSS_config,
-                                           time_domain_allocation,
-                                           &dmrs_parms,
-                                           &tda_info,
-                                           candidate_idx,
-                                           beam.idx,
-                                           cc->sib1_bcch_length);
-
+        NR_pdsch_dmrs_t dmrs_parms = get_dl_dmrs_params(scc, NULL, &tda_info, 1);
+        // Configure sched_ctrlCommon for SIB1
+        TBS = schedule_control_sib1(gNB_mac,
+                                    CC_id,
+                                    &sched_pdcch,
+                                    type0_PDCCH_CSS_config,
+                                    t,
+                                    &dmrs_parms,
+                                    &tda_info,
+                                    candidate_idx,
+                                    beam.idx,
+                                    cc->sib1_bcch_length);
+        if (TBS > 0) {
+          time_domain_allocation = t;
+          break;
+        }
+      }
+      AssertFatal(time_domain_allocation > 0, "Couldn't select any TDA for SIB1\n");
       gNB_mac->sched_ctrlCommon->sched_pdsch.tb_size = TBS;
       nfapi_nr_dl_tti_request_body_t *dl_req = &DL_req->dl_tti_request_body;
       int pdu_index = gNB_mac->pdu_index[0]++;
@@ -718,7 +724,9 @@ static void other_sib_sched_control(module_id_t module_idP,
   uint16_t *vrb_map = cc->vrb_map[beam.idx];
   uint8_t *sib_bcch_pdu = cc->other_sib_bcch_pdu[payload_idx];
   int num_total_bytes = cc->other_sib_bcch_length[payload_idx];
-  sched_pdsch_otherSI.tb_size = get_tbs_bch(&sched_pdsch_otherSI, num_total_bytes, vrb_map);
+  uint32_t TBS = get_tbs_bch(&sched_pdsch_otherSI, num_total_bytes, vrb_map);
+  AssertFatal(TBS > 0, "Couldn't allocate TBS for other SIB\n");
+  sched_pdsch_otherSI.tb_size = TBS;
   sched_pdsch_otherSI.R = nr_get_code_rate_dl(sched_pdsch_otherSI.mcs, 0);
   sched_pdsch_otherSI.Qm = nr_get_Qm_dl(sched_pdsch_otherSI.mcs, 0);
 
