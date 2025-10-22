@@ -784,7 +784,8 @@ int nr_srs_channel_estimation(int ant,
                               c16_t srs_estimated_channel_time_shifted[NR_SRS_IDFT_OVERSAMP_FACTOR * ofdm_symbol_size],
                               uint32_t *signal_power,
                               uint32_t *noise_power,
-                              int16_t *noise_power_per_rb)
+                              int16_t *noise_power_per_rb,
+                              c16_t delay_table[2 * MAX_DELAY_COMP + 1][NR_MAX_OFDM_SYMBOL_SIZE])
 {
 #ifdef SRS_DEBUG
   LOG_I(NR_PHY, "Calling %s function\n", __FUNCTION__);
@@ -801,40 +802,29 @@ int nr_srs_channel_estimation(int ant,
   if (N_ap == 4 && ((K_TC == 2 && srs_pdu->cyclic_shift >= 4) || (K_TC == 4 && srs_pdu->cyclic_shift >= 6))) {
     fd_cdm = 2;
   }
-  uint16_t subcarrier;
 
   c16_t srs_ls_estimated_channel[ofdm_symbol_size * N_symb_SRS];
   c16_t srs_estimated_channel_freq_avg[ofdm_symbol_size];
   memset(srs_ls_estimated_channel, 0, ofdm_symbol_size * N_symb_SRS * sizeof(c16_t));
   memset(srs_estimated_channel_freq_avg, 0, ofdm_symbol_size * sizeof(c16_t));
+  delay_t delay = {0};
 
   for (int srs_symb = 0; srs_symb < N_symb_SRS; srs_symb++) {
     uint16_t srs_symbol_offset = srs_symb * ofdm_symbol_size;
-
-    // Additional 4 in the array size is needed to maintain 16 byte memory alignment required for AVX2 instructions in channel
-    // interpolation
-    c16_t srs_est[ofdm_symbol_size + 4] __attribute__((aligned(32)));
-    memset(srs_est, 0, (ofdm_symbol_size + 4) * sizeof(c16_t));
-
-    // Estimate 16 byte memory alignment offset for the first SRS subcarrier to use AVX2 instructions in channel interpolation
-    uint8_t mem_offset = (16 - (((intptr_t)&srs_est[first_subcarrier + nr_srs_info->k_0_p[p_index][srs_symb]]) & 0xF))
-                         >> 2; // >> 2 <=> /sizeof(int32_t)
-
-    c16_t ls_estimated = {0};
 
 #ifdef SRS_DEBUG
     LOG_I(NR_PHY, "====================== UE port %d --> gNB Rx antenna %i ======================\n", p_index, ant);
     LOG_I(NR_PHY, "============================== SRS symbol index %d ===========================\n", srs_symb);
 #endif
 
-    subcarrier = subcarrier_offset + nr_srs_info->k_0_p[p_index][srs_symb];
+    // Channel estimation based on least square method
+
+    uint16_t subcarrier = subcarrier_offset + nr_srs_info->k_0_p[p_index][srs_symb];
     if (subcarrier >= ofdm_symbol_size) {
       subcarrier -= ofdm_symbol_size;
     }
 
-    uint16_t subcarrier_abs = mem_offset + first_subcarrier + nr_srs_info->k_0_p[p_index][srs_symb];
-    c16_t *srs_estimated_channel16 = &srs_est[subcarrier_abs];
-
+    c16_t ls_estimated = {0};
     for (int k = 0; k < M_sc_b_SRS; k++) {
       if (k % fd_cdm == 0) {
         ls_estimated = (c16_t){0, 0};
@@ -856,7 +846,9 @@ int nr_srs_channel_estimation(int ant,
         }
       }
 
-      srs_ls_estimated_channel[srs_symbol_offset + subcarrier] = ls_estimated;
+      for (int ktc = 0; ktc < K_TC && srs_symbol_offset + subcarrier + ktc < ofdm_symbol_size * N_symb_SRS; ktc++) {
+        srs_ls_estimated_channel[srs_symbol_offset + subcarrier + ktc] = ls_estimated;
+      }
 
 #ifdef SRS_DEBUG
       int subcarrier_log = subcarrier - subcarrier_offset;
@@ -877,6 +869,44 @@ int nr_srs_channel_estimation(int ant,
             ls_estimated.r,
             ls_estimated.i);
 #endif
+
+      // Subcarrier increment
+      subcarrier += K_TC;
+      if (subcarrier >= ofdm_symbol_size) {
+        subcarrier -= ofdm_symbol_size;
+      }
+    } // for (int k = 0; k < M_sc_b_SRS; k++)
+
+    // Delay estimation
+    c16_t ch_estimates_time[ofdm_symbol_size] __attribute__((aligned(32)));
+    nr_est_delay(ofdm_symbol_size, srs_ls_estimated_channel, ch_estimates_time, &delay);
+
+    // Interpolation of LS estimates
+
+    // Additional 4 in the array size is needed to maintain 16 byte memory alignment required for AVX2 instructions in channel
+    // interpolation
+    c16_t srs_est[ofdm_symbol_size + 4] __attribute__((aligned(32)));
+    memset(srs_est, 0, (ofdm_symbol_size + 4) * sizeof(c16_t));
+
+    // Estimate 16 byte memory alignment offset for the first SRS subcarrier to use AVX2 instructions in channel interpolation
+    uint8_t mem_offset =
+        (16 - (((intptr_t)&srs_est[first_subcarrier + nr_srs_info->k_0_p[p_index][srs_symb]]) & 0xF)) / sizeof(c16_t);
+
+    uint16_t subcarrier_abs = mem_offset + first_subcarrier + nr_srs_info->k_0_p[p_index][srs_symb];
+    c16_t *srs_estimated_channel16 = &srs_est[subcarrier_abs];
+
+    subcarrier = subcarrier_offset + nr_srs_info->k_0_p[p_index][srs_symb];
+    if (subcarrier >= ofdm_symbol_size) {
+      subcarrier -= ofdm_symbol_size;
+    }
+
+    int delay_idx = get_delay_idx(delay.est_delay, MAX_DELAY_COMP);
+    const c16_t *srs_delay_table = delay_table[delay_idx];
+
+    for (int k = 0; k < M_sc_b_SRS; k++) {
+
+      // Apply delay
+      ls_estimated = c16mulShift(srs_ls_estimated_channel[srs_symbol_offset + subcarrier], srs_delay_table[subcarrier], 8);
 
       // Channel interpolation
       if (srs_pdu->comb_size == 0) {
@@ -917,6 +947,27 @@ int nr_srs_channel_estimation(int ant,
       subcarrier_abs += K_TC;
 
     } // for (int k = 0; k < M_sc_b_SRS; k++)
+
+    // Revert delay
+    int inv_delay_idx = get_delay_idx(-delay.est_delay, MAX_DELAY_COMP);
+    const c16_t *srs_inv_delay_table = delay_table[inv_delay_idx];
+    subcarrier_abs =  mem_offset + first_subcarrier + nr_srs_info->k_0_p[p_index][srs_symb];
+    subcarrier = subcarrier_offset + nr_srs_info->k_0_p[p_index][0];
+    if (subcarrier >= ofdm_symbol_size) {
+      subcarrier -= ofdm_symbol_size;
+    }
+    for (int k = 0; k < K_TC * M_sc_b_SRS; k++) {
+      srs_est[subcarrier_abs] = c16mulShift(srs_est[subcarrier_abs], srs_inv_delay_table[subcarrier], 8);
+      // Subcarrier increment
+      subcarrier++;
+      if (subcarrier >= ofdm_symbol_size) {
+        subcarrier -= ofdm_symbol_size;
+      }
+      subcarrier_abs++;
+      if (subcarrier_abs >= ofdm_symbol_size) {
+        subcarrier_abs -= ofdm_symbol_size;
+      }
+    }
 
     memcpy(&srs_estimated_channel_freq[srs_symbol_offset], &srs_est[mem_offset], ofdm_symbol_size * sizeof(c16_t));
 
@@ -1009,7 +1060,7 @@ int nr_srs_channel_estimation(int ant,
     return -1;
   }
 
-  subcarrier = subcarrier_offset + nr_srs_info->k_0_p[p_index][0];
+  uint16_t subcarrier = subcarrier_offset + nr_srs_info->k_0_p[p_index][0];
   if (subcarrier >= ofdm_symbol_size) {
     subcarrier -= ofdm_symbol_size;
   }

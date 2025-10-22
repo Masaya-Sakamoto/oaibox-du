@@ -90,7 +90,8 @@ int nr_srs_channel_estimation(int ant,
                               c16_t srs_estimated_channel_time_shifted[NR_SRS_IDFT_OVERSAMP_FACTOR * ofdm_symbol_size],
                               uint32_t *signal_power,
                               uint32_t *noise_power,
-                              int16_t *noise_power_per_rb);
+                              int16_t *noise_power_per_rb,
+                              c16_t delay_table[2 * MAX_DELAY_COMP + 1][NR_MAX_OFDM_SYMBOL_SIZE]);
 
 void nr_freq_equalization(NR_DL_FRAME_PARMS *frame_parms,
                           c16_t *rxdataF_comp,

@@ -926,7 +926,8 @@ void nr_srs_rx_procedures(PHY_VARS_gNB *gNB,
                                   srs_estimated_channel_time_shifted[ant_rx_ind][p_ind],
                                   &signal_power,
                                   &noise_power,
-                                  noise_power_per_rb);
+                                  noise_power_per_rb,
+                                  frame_parms->delay_table);
 
         signal_power_avg += signal_power;
 
