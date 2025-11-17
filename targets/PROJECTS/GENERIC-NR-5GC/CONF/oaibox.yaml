@@ -3,11 +3,11 @@ Active_gNBs:
 Asn1_verbosity: none
 continuous-tx: 0
 E: 0
-export-mod-symbols: 0
 thread-pool: -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
 tune-offset: 0
 gNBs:
     - gNB_ID: "0xe00"
+      gNB_DU_ID: "0xe01"
       gNB_name: gNB-OAI
       maxMIMO_layers: 1
       tracking_area_code: 1
@@ -18,25 +18,26 @@ gNBs:
           snssaiList:
             - sst: "1"
               sd: "0xFFFFFF"
-      nr_cellid: "12345678"
+      nr_cellid: "11111111"
       pdsch_AntennaPorts_XP: 1
       pdsch_AntennaPorts_N1: 1
       pdsch_AntennaPorts_N2: 1
       pusch_AntennaPorts: 1
       do_CSIRS: 1
       do_SRS: 1
+      sib1_tda: 2
       min_rxtxtime: 2
       uess_agg_levels: [0, 4, 2, 1, 0]
       ul_prbblacklist: ""
       servingCellConfigCommon:
-        - physCellId: 0
+        - physCellId: 1
           absoluteFrequencySSB: 667200
           dl_frequencyBand: 77
           dl_absoluteFrequencyPointA: 666672
           dl_offstToCarrier: 0
           dl_subcarrierSpacing: 1
-          dl_carrierBandwidth: 51
-          initialDLBWPlocationAndBandwidth: 13750
+          dl_carrierBandwidth: 273
+          initialDLBWPlocationAndBandwidth: 1099
           initialDLBWPsubcarrierSpacing: 1
           initialDLBWPcontrolResourceSetZero: 10
           initialDLBWPsearchSpaceZero: 0
@@ -44,9 +45,9 @@ gNBs:
           ul_absoluteFrequencyPointA: 666672
           ul_offstToCarrier: 0
           ul_subcarrierSpacing: 1
-          ul_carrierBandwidth: 51
+          ul_carrierBandwidth: 273
           pMax: 24
-          initialULBWPlocationAndBandwidth: 13750
+          initialULBWPlocationAndBandwidth: 1099
           initialULBWPsubcarrierSpacing: 1
           prach_ConfigurationIndex: 148
           prach_msg1_FDM: 0
@@ -86,6 +87,8 @@ gNBs:
         SCTP_OUTSTREAMS: 2
       amf_ip_address:
         - ipv4: 172.31.0.132
+          active: "yes"
+          preference: ipv4
       NETWORK_INTERFACES:
         GNB_IPV4_ADDRESS_FOR_NG_AMF: 172.31.0.1
         GNB_IPV4_ADDRESS_FOR_NGU: 172.31.0.1
@@ -98,15 +101,16 @@ gNBs:
         n310: 20
         n311: 1
         t319: 400
-pdcp:
-  drb:
-    sn_size: "len18bits"
-    t_reordering: "ms1000"
-    discard_timer: "infinity"
 MACRLCs:
     - num_cc: 1
       tr_s_preference: local_L1
-      tr_n_preference: local_RRC
+      tr_n_preference: f1
+      local_n_address: 192.168.0.4
+      remote_n_address: 192.168.0.10
+      local_n_portc: 500
+      local_n_portd: 2152
+      remote_n_portc: 501
+      remote_n_portd: 2152
       pucch_TargetSNRx10: 200
       pusch_TargetSNRx10: 200
       pusch_FailureThres: 100
@@ -127,18 +131,18 @@ RUs:
       nb_tx: 1
       nb_rx: 1
       att_tx: 0
-      att_rx: 24
+      att_rx: 10
       sl_ahead: 6
       bands:
         - 77
       max_pdschReferenceSignalPower: -27
-      max_rxgain: 76
+      max_rxgain: 60
       if_freq: "0"
       eNB_instances:
         - 0
       gpio_controller: generic
       clock_src: internal
-      sdr_addrs: ""
+      sdr_addrs: type=x4xx,serial=328AAB8,model=X410,mgmt_addr=192.168.10.2,addr=192.168.10.2,second_addr=192.168.11.2,clock_source=gpsdo,time_source=gpsdo
 opt:
     type: none
     address: 127.0.0.1
@@ -148,17 +152,6 @@ rfsimulator:
     options: []
     modelname: AWGN
     IQfile: /tmp/rfsimulator.iqs
-security:
-    ciphering_algorithms:
-        - nea0
-        - nea2
-        - nea1
-    integrity_algorithms:
-        - nia2
-        - nia1
-        - nia0
-    drb_ciphering: "yes"
-    drb_integrity: "no"
 log_config:
     global_log_level: info
     hw_log_level: info
@@ -171,6 +164,6 @@ log_config:
     f1ap_log_level: info
     gtpu_log_level: info
 e2_agent:
-    near_ric_ip_addr: 127.0.0.1
-    local_ip_addr: 127.0.0.1
+    near_ric_ip_addr: 192.168.0.10
+    local_ip_addr: 192.168.0.4
     sm_dir: /usr/local/lib/flexric/
