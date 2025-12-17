@@ -95,7 +95,19 @@ void output_reg_values(const std::string& bank,
     // GPIO Src - get_gpio_src() not supported for all devices
     try {
         const auto gpio_src = usrp->get_gpio_src(port);
-        std::cout << boost::format("%10s:") % "SRC";
+        std::cout << boost::format("%10s:") % "SRC_GPIO0";
+        for (auto src : gpio_src) {
+            std::cout << " " << src;
+        }
+        std::cout << std::endl;
+    } catch (const uhd::not_implemented_error& e) {
+        std::cout << "Ignoring " << e.what() << std::endl;
+    } catch (...) {
+        throw;
+    }
+    try {
+        const auto gpio_src = usrp->get_gpio_src("GPIO1");
+        std::cout << boost::format("%10s:") % "SRC_GPIO1";
         for (auto src : gpio_src) {
             std::cout << " " << src;
         }
@@ -141,7 +153,7 @@ int usrp_spi_setup(uhd::usrp::multi_usrp::sptr available_usrp)
     sources[sdo] = "DB0_SPI";
     sources[cs] = "DB0_SPI";
     usrp->set_gpio_src(port, sources);
-    // usrp->set_gpio_src("GPIO1", sources);
+    usrp->set_gpio_src("GPIO1", sources);
 
     // Create peripheral configuration per peripheral
     // The terms 'MISO' and 'MOSI' in the spi_config_t struct map to 'SDI' and 'SDO' respectively.
@@ -165,6 +177,13 @@ int usrp_spi_setup(uhd::usrp::multi_usrp::sptr available_usrp)
     outputs |= 1 << GPIO_DEFAULT_LDB_PIN; //LDB, low pulse after transmission
     trigger |= 1 << GPIO_DEFAULT_TX_EN_PIN;
     trigger |= 1 << GPIO_DEFAULT_RX_EN_PIN;
+    outputs |= 1 << periph_cfg.periph_clk+12; //for GPIO1
+    outputs |= 1 << periph_cfg.periph_sdo+12; //for GPIO1
+    outputs |= 1 << periph_cfg.periph_cs+12; //for GPIO1
+    outputs |= 1 << GPIO_DEFAULT_SDI_PIN+12; //for GPIO1
+    outputs |= 1 << GPIO_DEFAULT_LDB_PIN+12; //for GPIO1
+    trigger |= 1 << GPIO_DEFAULT_TX_EN_PIN+12; // for GPIO1
+    trigger |= 1 << GPIO_DEFAULT_RX_EN_PIN+12; // for GPIO1
     std::cout << "[USRP] direction pin config: " << (outputs|trigger) << std::endl;
     usrp->set_gpio_attr(gpio_bank, "DDR", (outputs|trigger) & 0xFFFFFF);
     spi_ref = spi_getter_iface.get_spi_ref(periph_cfgs);
@@ -187,9 +206,16 @@ int usrp_spi_setup(uhd::usrp::multi_usrp::sptr available_usrp)
     usrp->set_gpio_attr(gpio_bank, "ATR_RX", GPIO_BIT(GPIO_DEFAULT_RX_EN_PIN), GPIO_BIT(GPIO_DEFAULT_RX_EN_PIN));
     usrp->set_gpio_attr(gpio_bank, "ATR_XX", GPIO_BIT(GPIO_DEFAULT_TX_EN_PIN), GPIO_BIT(GPIO_DEFAULT_TX_EN_PIN));
 
+    // for GPIO1
+    usrp->set_gpio_attr(gpio_bank, "OUT", GPIO_BIT(SPI_DEFAULT_SDI_PIN+12), GPIO_BIT(SPI_DEFAULT_SDI_PIN+12));
+    usrp->set_gpio_attr(gpio_bank, "OUT", GPIO_BIT(GPIO_DEFAULT_LDB_PIN+12), GPIO_BIT(GPIO_DEFAULT_LDB_PIN+12));
+
+    usrp->set_gpio_attr(gpio_bank, "ATR_RX", GPIO_BIT(GPIO_DEFAULT_RX_EN_PIN+12), GPIO_BIT(GPIO_DEFAULT_RX_EN_PIN+12));
+    usrp->set_gpio_attr(gpio_bank, "ATR_XX", GPIO_BIT(GPIO_DEFAULT_TX_EN_PIN+12), GPIO_BIT(GPIO_DEFAULT_TX_EN_PIN+12));
+
     std::cout << "[USRP] Configured GPIO values:" << std::endl;
     bool has_src_api = true;
-    output_reg_values(gpio_bank, port, usrp, num_bits, has_src_api);
+    output_reg_values(gpio_bank, port, usrp, 24, has_src_api);
 
     spi_config.divider            = clk_divider;
     spi_config.use_custom_divider = true;

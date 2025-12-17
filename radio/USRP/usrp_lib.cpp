@@ -1704,8 +1704,8 @@ extern "C" {
 }/* extern c */
 
 #if defined(ENABLE_TMYTEK_UD_BBOX) || defined(ENABLE_TMYTEK_AIP)
-const std::vector<std::string> ud_list = {};
-const std::vector<std::string> bf_list = {};
+const std::vector<std::string> ud_list = {"UD-BD24110026-24"};
+const std::vector<std::string> bf_list = {"D2336E114-28"};
 
 int set_ud_freq(tlkcore_lib::tlkcore_ptr service)
 {
