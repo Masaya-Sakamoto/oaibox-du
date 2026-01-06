@@ -1,4 +1,4 @@
 [submodule "openair2/E2AP/flexric"]
 	path = openair2/E2AP/flexric
-    url = https://bitbucket.org/allbesmart/oaibox-flexric.git
-    branch = integration
+    url = git@github.com:Masaya-Sakamoto/oaibox-flexric.git
+    branch = OAIBOX_2025.14.0
