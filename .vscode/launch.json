@@ -1,0 +1,71 @@
+{
+    "configurations": [
+
+    {
+        "name": "OAI-gNB Launch",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/cmake_targets/ran_build/build/nr-softmodem",
+        "args": [
+            "-O",
+            "/opt/oai-gnb/etc/gnb.yaml",
+            "--rfsim"
+        ],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}/cmake_targets/ran_build/build/",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "gdb",
+        "setupCommands": [
+            {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+            },
+            {
+                "description": "Set Disassembly Flavor to Intel",
+                "text": "-gdb-set disassembly-flavor intel",
+                "ignoreFailures": true
+            }
+        ]
+    },
+    {
+        "name": "OAI-nrUE Launch",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/cmake_targets/ran_build/build/nr-uesoftmodem",
+        "args": [
+            "-O",
+            "/opt/oai-nr-ue/etc/nr-ue.yaml",
+            "--rfsim",
+            "-C",
+            "4049220000",
+            "-r",
+            "273",
+            "--numerology",
+            "1",
+            "--ssb",
+            "144",
+            "--band",
+            "77"
+        ],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}/cmake_targets/ran_build/build/",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "gdb",
+        "setupCommands": [
+            {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+            },
+            {
+                "description": "Set Disassembly Flavor to Intel",
+                "text": "-gdb-set disassembly-flavor intel",
+                "ignoreFailures": true
+            }
+        ]
+    }
+    ]
+}

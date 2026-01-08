@@ -11,7 +11,7 @@ log/
 lte_build_oai/
 
 # IDE files
-.vscode
+# .vscode
 .idea
 .cproject
 .project
