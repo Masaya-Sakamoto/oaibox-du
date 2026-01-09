@@ -476,7 +476,7 @@ static void evaluate_rsrp_report(gNB_MAC_INST *nrmac,
     int bitlen = csi_report->CSI_report_bitlen.cri_ssbri_bitlen;
     curr_payload = pickandreverse_bits(payload, bitlen, *cumul_bits);
     rsrp_report->resource_id[i] = *(index_list[bitlen > 0 ? ((curr_payload) & ~(~1U << (bitlen - 1))) : bitlen]);
-    LOG_D(MAC,"SSB/CSI-RS index = %d\n", rsrp_report->resource_id[i]);
+    LOG_I(MAC,"SSB/CSI-RS index = %d\n", rsrp_report->resource_id[i]);
     *cumul_bits += bitlen;
   }
 

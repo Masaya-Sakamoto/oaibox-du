@@ -143,9 +143,9 @@ void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, nfapi_n
                                       fp->symbols_per_slot,
                                       bitmap);
   c16_t *w = get_prec_weights(fp);
-
-  nr_generate_pss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP, ssb_start_symbol, cfg, fp, w);
-  nr_generate_sss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP, ssb_start_symbol, cfg, fp, w);
+  int16_t beam_amp = pb->prgs_list[0].dig_bf_interface_list[0].beam_idx == 0 ? -10 : 0;
+  nr_generate_pss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP+beam_amp, ssb_start_symbol, cfg, fp, w);
+  nr_generate_sss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP+beam_amp, ssb_start_symbol, cfg, fp, w);
 
   uint16_t slots_per_hf = (fp->slots_per_frame) >> 1;
   int n_hf = slot < slots_per_hf ? 0 : 1;
@@ -154,7 +154,7 @@ void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, nfapi_n
   nr_generate_pbch_dmrs(nr_gold_pbch(fp->Lmax, gNB->gNB_config.cell_config.phy_cell_id.value, hf, ssb_index & 7),
                         txdataF[beam_nb],
                         txdataF_offset,
-                        gNB->TX_AMP,
+                        gNB->TX_AMP+beam_amp,
                         ssb_start_symbol,
                         cfg,
                         fp,
