@@ -905,29 +905,52 @@ void nr_srs_rx_procedures(PHY_VARS_gNB *gNB,
   int16_t noise_power_per_rb[srs_pdu->bwp_size];
   memset(noise_power_per_rb, 0, srs_pdu->bwp_size * sizeof(int16_t));
 
+  c16_t srs_ls_estimated_channel[nb_antennas_rx][N_ap][ofdm_symbol_size * N_symb_SRS];
+
   if (*srs_est >= 0) {
     start_meas(&gNB->srs_channel_estimation_stats);
+
+    delay_t delay = {0};
+    for (int ant_rx_ind = 0; ant_rx_ind < nb_antennas_rx; ant_rx_ind++) {
+      for (int p_ind = 0; p_ind < N_ap; p_ind++) {
+        delay_t delay_aux = {0};
+        nr_srs_ls_channel_estimation(ant_rx_ind,
+                                     p_ind,
+                                     ofdm_symbol_size,
+                                     frame_parms->first_carrier_offset,
+                                     N_symb_SRS,
+                                     srs_pdu,
+                                     nr_srs_info,
+                                     nr_srs_info->srs_generated_signal[p_ind],
+                                     srs_received_signal[ant_rx_ind],
+                                     srs_ls_estimated_channel[ant_rx_ind][p_ind],
+                                     &delay_aux);
+        if (delay_aux.delay_max_val > delay.delay_max_val)
+          delay = delay_aux;
+      }
+    }
+
     for (int ant_rx_ind = 0; ant_rx_ind < nb_antennas_rx; ant_rx_ind++) {
       uint32_t noise_power = 0;
       for (int p_ind = 0; p_ind < N_ap; p_ind++) {
         uint32_t signal_power = 0;
-        nr_srs_channel_estimation(ant_rx_ind,
-                                  p_ind,
-                                  ofdm_symbol_size,
-                                  frame_parms->first_carrier_offset,
-                                  N_symb_SRS,
-                                  srs_pdu,
-                                  nr_srs_info,
-                                  nr_srs_info->srs_generated_signal[p_ind],
-                                  srs_received_signal[ant_rx_ind],
-                                  srs_received_noise[ant_rx_ind],
-                                  srs_estimated_channel_freq[ant_rx_ind][p_ind],
-                                  srs_estimated_channel_time[ant_rx_ind][p_ind],
-                                  srs_estimated_channel_time_shifted[ant_rx_ind][p_ind],
-                                  &signal_power,
-                                  &noise_power,
-                                  noise_power_per_rb,
-                                  frame_parms->delay_table);
+        nr_srs_channel_interpolation(ant_rx_ind,
+                                     p_ind,
+                                     ofdm_symbol_size,
+                                     frame_parms->first_carrier_offset,
+                                     N_symb_SRS,
+                                     srs_pdu,
+                                     nr_srs_info,
+                                     srs_ls_estimated_channel[ant_rx_ind][p_ind],
+                                     delay.est_delay,
+                                     srs_received_noise[ant_rx_ind],
+                                     srs_estimated_channel_freq[ant_rx_ind][p_ind],
+                                     srs_estimated_channel_time[ant_rx_ind][p_ind],
+                                     srs_estimated_channel_time_shifted[ant_rx_ind][p_ind],
+                                     &signal_power,
+                                     &noise_power,
+                                     noise_power_per_rb,
+                                     frame_parms->delay_table);
 
         signal_power_avg += signal_power;
 
