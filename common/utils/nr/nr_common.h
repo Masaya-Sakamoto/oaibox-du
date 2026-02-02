@@ -361,6 +361,10 @@ float get_beta_dmrs(int num_cdm_groups_no_data, bool is_type2);
 #define ROUNDIDIV(a,b) (((a<<1)+b)/(b<<1))
 #define BOUNDED_EVAL(a, b, c) (min(c, max(a, b)))
 
+/* Macro used to perform a circular increment. This implementation is computationally more efficient than using the remainder of the
+ * integer division, and improves code readability when compared to repetitive if... else statements. */
+#define CIRCULAR_INC(val, inc, size) (((val) + (inc) >= (size)) ? ((val) + (inc) - (size)) : ((val) + (inc)))
+
 static const char *const duplex_mode_txt[] = {"FDD", "TDD"};
 
 #ifdef __cplusplus
