@@ -303,7 +303,8 @@ const nr_bandentry_t nr_bandtable[] = {{1, 1920000, 1980000, 2110000, 2170000, 2
                                        {260, 37000020, 40000000, 37000020, 40000000, 1, 2229166, 60},
                                        {260, 37000080, 40000000, 37000080, 40000000, 2, 2229167, 120},
                                        {261, 27500040, 28350000, 27500040, 28350000, 1, 2070833, 60},
-                                       {261, 27500040, 28350000, 27500040, 28350000, 2, 2070833, 120}};
+                                       {261, 27500040, 28350000, 27500040, 28350000, 2, 2070833, 120},
+                                       {999, 7125000, 24250000, 7125000, 24250000, 1, 0, 60}};
 
 // synchronization raster per band tables (Rel.17)
 // (38.101-1 Table 5.4.3.3-1 and 38.101-2 Table 5.4.3.3-1)
@@ -381,6 +382,7 @@ const sync_raster_t sync_raster[] = {
   {260, 4, 22996, 2, 23164},
   {261, 3, 22446, 1, 22492},
   {261, 4, 22446, 2, 22490},
+  {999, 3, 10364, 1, 22255}
 };
 // clang-format on
 
@@ -992,7 +994,9 @@ void get_samplerate_and_bw(int mu,
       break;
     case 162 :
       if (threequarter_fs) {
-        AssertFatal(1==0,"N_RB %d cannot use 3/4 sampling\n",n_rb);
+        *sample_rate=92.16e6;
+        *tx_bw = 60e6;
+        *rx_bw = 60e6;
       }
       else {
         *sample_rate=61.44e6;
@@ -1165,7 +1169,11 @@ uint32_t get_ssb_offset_to_pointA(uint32_t absoluteFrequencySSB,
   // only difference wrt NR-ARFCN is delta frequency 5kHz if f < 3 GHz for ARFCN
   uint32_t absolute_diff = (absoluteFrequencySSB - absoluteFrequencyPointA);
   const int scaling_5khz = absoluteFrequencyPointA < 600000 ? 3 : 1;
-  const int scaling = frequency_range == FR2 ? 1 << (ssbSubcarrierSpacing - 2) : 1 << ssbSubcarrierSpacing;
+  int scaling = frequency_range == FR2 ? 1 << (ssbSubcarrierSpacing - 2) : 1 << ssbSubcarrierSpacing;
+  // FR3
+  if (absoluteFrequencyPointA > 875000 && absoluteFrequencyPointA < 2016667) {
+    scaling = 1 << ssbSubcarrierSpacing;
+  }
   const int scaled_abs_diff = absolute_diff / (scaling_5khz * scaling);
   // absoluteFrequencySSB is the central frequency of SSB which is made by 20RBs in total
   const int ssb_offset_point_a = ((scaled_abs_diff / 12) - 10) * scaling;
@@ -1456,6 +1464,9 @@ frequency_range_t get_freq_range_from_freq(uint64_t freq)
   if (freq >= 24250000000 && freq <= 71000000000)
     return FR2;
 
+  if (freq > 7125000000 && freq < 24250000000)
+    return FR3;
+
   AssertFatal(false, "Undefined Frequency Range for frequency %ld Hz\n", freq);
 }
 
@@ -1467,6 +1478,9 @@ frequency_range_t get_freq_range_from_arfcn(uint32_t arfcn)
 
   if (arfcn >= 2016667 && arfcn <= 2795832)
     return FR2;
+
+  if (arfcn > 875000 && arfcn < 2016667)
+    return FR3;
 
   AssertFatal(false, "Undefined Frequency Range for ARFCN %d\n", arfcn);
 }

@@ -44,6 +44,8 @@
 
 #include "executables/softmodem-common.h"
 
+static int max_sib1_to_wireshark = 1;
+
 static void schedule_ssb(frame_t frame,
                          slot_t slot,
                          NR_ServingCellConfigCommon_t *scc,
@@ -632,6 +634,24 @@ void schedule_nr_sib1(module_id_t module_idP,
         T_INT(slotP),
         T_INT(0 /* harq_pid */),
         T_BUFFER(cc->sib1_bcch_pdu, cc->sib1_bcch_length));
+
+      if (max_sib1_to_wireshark > 0) {
+        max_sib1_to_wireshark--;
+        ws_trace_t tmp = {.nr = true,
+                          .direction = DIRECTION_DOWNLINK,
+                          .pdu_buffer = cc->sib1_bcch_pdu,
+                          .pdu_buffer_size = cc->sib1_bcch_length,
+                          .ueid = 0,
+                          .rntiType = WS_SI_RNTI,
+                          .rnti = 0xffff,
+                          .sysFrame = frameP,
+                          .subframe = slotP,
+                          .harq_pid = 0, // difficult to find the harq pid here
+                          .oob_event = 0,
+                          .oob_event_value = 0};
+        trace_pdu(&tmp);
+      }
+
     }
   }
 }

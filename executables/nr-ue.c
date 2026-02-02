@@ -757,6 +757,21 @@ void *UE_thread(void *arg)
   bool ntn_targetcell = false;
   int ntn_koffset = 0;
   int duration_rx_to_tx = NR_UE_CAPABILITY_SLOT_RX_TO_TX;
+  // Increase 'duration_rx_to_tx' value to avoid LLLLLLs on the UE
+  // This value MUST be less or equal to 'min_rxtxtime' on the gNB config file
+  switch (get_softmodem_params()->numerology) {
+    case 0: // 15 kHz SCS
+      duration_rx_to_tx = 3;
+      break;
+    case 1: // 30 kHz SCS
+      duration_rx_to_tx = 4;
+      break;
+    case 3: // 120 kHz SCS
+      duration_rx_to_tx = 6;
+      break;
+    default:
+      break;
+  }
   int timing_advance = UE->timing_advance + UE->timing_advance_ntn;
   UE->N_TA_offset = determine_N_TA_offset(UE);
   NR_UE_MAC_INST_t *mac = get_mac_inst(UE->Mod_id);

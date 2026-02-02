@@ -67,6 +67,7 @@
 #include "thread-pool.h"
 #include "time_meas.h"
 #include "utils.h"
+#include <oaibox_data_export.h>
 
 #define TICK_TO_US(ts) (ts.trials==0?0:ts.diff/ts.trials)
 #define L1STATSSTRLEN 16384
@@ -358,6 +359,8 @@ void init_gNB_Tpool(int inst)
 
   if (!IS_SOFTMODEM_NOSTATS)
     threadCreate(&proc->L1_stats_thread, nrL1_stats_thread, (void *)gNB, "L1_stats", -1, OAI_PRIORITY_RT_LOW);
+
+  threadCreate(&proc->oaibox_data_export_thread, oaibox_data_export_func, (void *)NULL, "oaibox_data_export_thread", -1, OAI_PRIORITY_RT_LOW);
 }
 
 void term_gNB_Tpool(int inst) {

@@ -302,6 +302,10 @@ void mac_top_init_gNB(ngran_node_t node_type,
 
       RC.nrmac[i]->tag = (NR_TAG_t*)malloc(sizeof(NR_TAG_t));
       memset((void*)RC.nrmac[i]->tag,0,sizeof(NR_TAG_t));
+
+      seq_arr_init(&RC.nrmac[i]->nssai_config_dl, sizeof(nssai_config_t));
+      seq_arr_init(&RC.nrmac[i]->nssai_config_ul, sizeof(nssai_config_t));
+
       for(int n = 0; n < MAX_NUM_OF_SSB; n++)
         RC.nrmac[i]->sib1_pdsch[n].time_domain_allocation = -1;
       RC.nrmac[i]->common_channels[0].ServingCellConfigCommon = scc;

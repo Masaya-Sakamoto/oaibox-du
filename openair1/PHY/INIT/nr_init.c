@@ -400,6 +400,7 @@ void nr_phy_config_request(NR_PHY_Config_t *phy_config)
   fp->ofdm_offset_divisor = RC.gNB[Mod_id]->ofdm_offset_divisor;
   init_symbol_rotation(fp);
   init_timeshift_rotation(fp);
+  init_prec_weights(fp);
 }
 
 static void init_DLSCH_struct(PHY_VARS_gNB *gNB)

@@ -668,7 +668,7 @@ long rrc_get_max_nr_csrs(const int max_rbs, const long b_SRS) {
   long c_srs = 0;
   uint16_t m = 4;
   for(int c = 1; c<64; c++) {
-    if(m_SRS[c]>m && m_SRS[c]<max_rbs) {
+    if(m_SRS[c]>m && m_SRS[c]<=max_rbs) {
       c_srs = c;
       m = m_SRS[c];
     }
@@ -1241,7 +1241,10 @@ static void config_pucch_resset0(NR_PUCCH_Config_t *pucch_Config,
 
   NR_PUCCH_Resource_t *pucchres0 = calloc(1,sizeof(*pucchres0));
   pucchres0->pucch_ResourceId = *pucchid;
-  pucchres0->startingPRB = (PUCCH2_SIZE * num_pucch2) + uid;
+  pucchres0->startingPRB = (PUCCH2_SIZE * num_pucch2 + 2) + (uid * 2);
+  if (pucchres0->startingPRB >= curr_bwp) {
+    pucchres0->startingPRB = (pucchres0->startingPRB % curr_bwp) + (PUCCH2_SIZE * num_pucch2 + 3) - (curr_bwp % 2);
+  }
   // checked for validity in verify_radio_configuration
   AssertFatal(pucchres0->startingPRB < curr_bwp, "Not enough resources in current BWP (size %d) to allocate uid %d\n", curr_bwp, uid);
   pucchres0->intraSlotFrequencyHopping = NULL;
