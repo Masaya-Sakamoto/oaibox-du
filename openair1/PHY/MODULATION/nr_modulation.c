@@ -665,6 +665,14 @@ void init_timeshift_rotation(NR_DL_FRAME_PARMS *fp)
   }
 }
 
+// We are just creating weights that repeat the signal, and normalize the transmit power. Other weights should be implemented.
+void init_prec_weights(NR_DL_FRAME_PARMS *fp)
+{
+  double N = 1; //sqrt(fp->nb_antennas_tx);
+  for (int i = 0; i < fp->nb_antennas_tx; i++)
+    fp->prec_weights[i] = (c16_t){(1 << 14) / N, 0};
+}
+
 c16_t nr_layer_precoder(int sz, c16_t datatx_F_precoding[][sz], const char *prec_matrix, uint8_t n_layers, int32_t re_offset)
 {
   c16_t precodatatx_F = {0};

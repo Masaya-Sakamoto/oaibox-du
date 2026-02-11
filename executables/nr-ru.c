@@ -1631,41 +1631,57 @@ static void NRRCconfig_RU(configmodule_interface_t *cfg)
       LOG_I(PHY, "RU USRP rx subdev == %s\n", ru->openair0_cfg.rx_subdev);
     }
 
-    if (config_isparamset(param, RU_SDR_CLK_SRC)) {
-      char *str = *param[RU_SDR_CLK_SRC].strptr;
-      if (strcmp(str, "internal") == 0) {
-        ru->openair0_cfg.clock_source = internal;
-        LOG_I(PHY, "RU clock source set as internal\n");
-      } else if (strcmp(str, "external") == 0) {
-        ru->openair0_cfg.clock_source = external;
-        LOG_I(PHY, "RU clock source set as external\n");
-      } else if (strcmp(str, "gpsdo") == 0) {
-        ru->openair0_cfg.clock_source = gpsdo;
-        LOG_I(PHY, "RU clock source set as gpsdo\n");
-      } else {
-        LOG_E(PHY, "Erroneous RU clock source in the provided configuration file: '%s'\n", str);
-      }
+    char *str = NULL;
+    char clock_source_str[32] = "internal";
+    if (config_isparamset(param, RU_SDR_ADDRS)) {
+      str = *param[RU_SDR_ADDRS].strptr;
+      extract_sdr_param(str, "clock_source=", clock_source_str, sizeof(clock_source_str));
+    } else if (config_isparamset(param, RU_SDR_CLK_SRC)) {
+      str = *param[RU_SDR_CLK_SRC].strptr;
+      strncpy(clock_source_str, str, 31);
+      clock_source_str[31] = '\0';
     } else {
-      LOG_D(PHY, "Setting clock source to internal\n");
+      LOG_E(PHY, "Setting clock source to internal\n");
+      ru->openair0_cfg.clock_source = internal;
+    }
+    if (strcmp(clock_source_str, "internal") == 0) {
+      ru->openair0_cfg.clock_source = internal;
+      LOG_I(PHY, "RU clock source set as internal\n");
+    } else if (strcmp(clock_source_str, "external") == 0) {
+      ru->openair0_cfg.clock_source = external;
+      LOG_I(PHY, "RU clock source set as external\n");
+    } else if (strcmp(clock_source_str, "gpsdo") == 0) {
+      ru->openair0_cfg.clock_source = gpsdo;
+      LOG_I(PHY, "RU clock source set as gpsdo\n");
+    } else {
+      LOG_E(PHY, "Erroneous RU clock source in the provided configuration file: '%s'. Reverting to internal.\n", clock_source_str);
       ru->openair0_cfg.clock_source = internal;
     }
 
+    char time_source_str[32] = "internal";
+    if (config_isparamset(param, RU_SDR_ADDRS)) {
+      str = *param[RU_SDR_ADDRS].strptr;
+      extract_sdr_param(str, "time_source=", time_source_str, sizeof(time_source_str));
+    }
     if (config_isparamset(param, RU_SDR_TME_SRC)) {
-      char *str = *param[RU_SDR_TME_SRC].strptr;
-      if (strcmp(str, "internal") == 0) {
-        ru->openair0_cfg.time_source = internal;
-        LOG_I(PHY, "RU time source set as internal\n");
-      } else if (strcmp(str, "external") == 0) {
-        ru->openair0_cfg.time_source = external;
-        LOG_I(PHY, "RU time source set as external\n");
-      } else if (strcmp(str, "gpsdo") == 0) {
-        ru->openair0_cfg.time_source = gpsdo;
-        LOG_I(PHY, "RU time source set as gpsdo\n");
-      } else {
-        LOG_E(PHY, "Erroneous RU time source in the provided configuration file: '%s'\n", str);
-      }
+      str = *param[RU_SDR_TME_SRC].strptr;
+      strncpy(time_source_str, str, 31);
+      time_source_str[31] = '\0';
     } else {
-      LOG_D(PHY, "Setting time source to internal\n");
+      LOG_E(PHY, "Setting time source to internal\n");
+      ru->openair0_cfg.time_source = internal;
+    }
+    if (strcmp(time_source_str, "internal") == 0) {
+      ru->openair0_cfg.time_source = internal;
+      LOG_I(PHY, "RU time source set as internal\n");
+    } else if (strcmp(time_source_str, "external") == 0) {
+      ru->openair0_cfg.time_source = external;
+      LOG_I(PHY, "RU time source set as external\n");
+    } else if (strcmp(time_source_str, "gpsdo") == 0) {
+      ru->openair0_cfg.time_source = gpsdo;
+      LOG_I(PHY, "RU time source set as gpsdo\n");
+    } else {
+      LOG_E(PHY, "Erroneous RU time source in the provided configuration file: '%s'. Reverting to internal.\n", time_source_str);
       ru->openair0_cfg.time_source = internal;
     }
 

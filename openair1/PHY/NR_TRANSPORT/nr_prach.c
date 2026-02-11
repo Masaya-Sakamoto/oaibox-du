@@ -281,6 +281,12 @@ static void rx_nr_prach_ru_internal(prach_item_t *p,
     dftlen >>= 2;
     break;
 
+  case 11520:
+    // 10 MHz @ 11.52 Ms/s
+    Ncp = (Ncp * 3) / 4 >> 1;
+    dftlen = (dftlen * 3) / 4 >> 1;
+    break;
+
   case 15360:
     // 10, 15 MHz @ 15.36 Ms/s
     Ncp >>= 1;

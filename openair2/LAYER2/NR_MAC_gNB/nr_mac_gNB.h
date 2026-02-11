@@ -885,6 +885,13 @@ typedef struct fsn {
   slot_t s;
 } fsn_t;
 
+typedef struct nssai_config_t {
+  uint8_t sst;
+  uint32_t sd;
+  uint16_t prb_start;
+  uint16_t num_prbs;
+} nssai_config_t;
+
 /*! \brief top level eNB MAC structure */
 typedef struct gNB_MAC_INST_s {
   /// Ethernet parameters for northbound midhaul interface
@@ -996,6 +1003,9 @@ typedef struct gNB_MAC_INST_s {
   nr_mac_rrc_ul_if_t mac_rrc;
   f1_config_t f1_config;
   int16_t frame;
+  int16_t slot;
+  seq_arr_t nssai_config_dl;
+  seq_arr_t nssai_config_ul;
 
   /// number of UEs to exceed to disable stats
   int stats_max_ue;

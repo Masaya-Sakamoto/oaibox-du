@@ -326,6 +326,8 @@ typedef struct gNB_L1_proc_t_s {
   /// set of scheduling variables RXn-TXnp4 threads
   gNB_L1_rxtx_proc_t L1_proc;
   gNB_L1_rxtx_proc_t L1_proc_tx;
+  /// pthread structure for dumping gNB stats
+  pthread_t oaibox_data_export_thread;
 } gNB_L1_proc_t;
 
 typedef struct {
@@ -499,6 +501,8 @@ typedef struct PHY_VARS_gNB_s {
   pthread_t L1_tx_thread;
   int L1_tx_thread_core;
   void *scopeData;
+  uint32_t segments_count;
+  uint32_t ldpc_iterations_count;
 } PHY_VARS_gNB;
 
 struct puschSymbolReqId {

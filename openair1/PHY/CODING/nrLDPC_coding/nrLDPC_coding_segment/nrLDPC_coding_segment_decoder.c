@@ -38,6 +38,7 @@
 #include "SCHED_NR/sched_nr.h"
 #include "defs.h"
 #include "common/utils/LOG/log.h"
+#include "PHY/CODING/TESTBENCH/coding_unitary_defs.h"
 
 #include <stdalign.h>
 #include <stdint.h>
@@ -214,6 +215,11 @@ static void nr_process_decode_segment(void *arg)
 
   ////////////////////////////////// pl =====> llrProcBuf //////////////////////////////////
   int decodeIterations = LDPCdecoder(p_decoderParms, l, llrProcBuf, p_procTime, rdata->abort_decode);
+
+  if (RC.gNB) {
+    RC.gNB[0]->ldpc_iterations_count += decodeIterations;
+    RC.gNB[0]->segments_count++;
+  }
 
   if (decodeIterations < p_decoderParms->numMaxIter) {
     memcpy(rdata->c, llrProcBuf, K >> 3);

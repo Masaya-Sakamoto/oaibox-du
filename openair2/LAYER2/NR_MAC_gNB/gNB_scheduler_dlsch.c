@@ -335,7 +335,7 @@ static uint32_t update_dlsch_buffer(frame_t frame, slot_t slot, NR_UE_info_t *UE
     memset(&sched_ctrl->rlc_status[lcid], 0, sizeof(sched_ctrl->rlc_status[lcid]));
     if (c->suspended)
       continue;
-    if (lcid == DL_SCH_LCID_DTCH && nr_timer_is_active(&sched_ctrl->transm_interrupt))
+    if (lcid >= DL_SCH_LCID_DTCH && (UE->reconfigCellGroup || nr_timer_is_active(&sched_ctrl->transm_interrupt)))
       continue;
     sched_ctrl->rlc_status[lcid] = nr_mac_rlc_status_ind(rnti, frame, lcid);
 
@@ -418,6 +418,34 @@ bwp_info_t get_pdsch_bwp_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE)
   return bwp_info;
 }
 
+nssai_bwp_info_t get_pdsch_nssai_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE)
+{
+  NR_UE_DL_BWP_t *dl_bwp = &UE->current_DL_BWP;
+  NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+
+  nssai_bwp_info_t nssai_bwp_info;
+  nssai_bwp_info.prb_start = dl_bwp->BWPStart;
+  nssai_bwp_info.prb_stop = dl_bwp->BWPSize - 1;
+
+  uint8_t prev_sst = 0;
+  for (int j = 0; j < seq_arr_size(&nr_mac->nssai_config_dl); j++) {
+    const nssai_config_t *n = seq_arr_at(&nr_mac->nssai_config_dl, j);
+    if (n->sst > prev_sst) {
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); i++) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        if (c->nssai.sst == n->sst && c->nssai.sd == n->sd) {
+          nssai_bwp_info.prb_start = n->prb_start;
+          nssai_bwp_info.prb_stop = n->prb_start + n->num_prbs - 1;
+          prev_sst = n->sst;
+          LOG_D(NR_MAC, "DL: SST %d start PRB %d PRB stop %d\n", c->nssai.sst, nssai_bwp_info.prb_start, nssai_bwp_info.prb_stop);
+          break;
+        }
+      }
+    }
+  }
+  return nssai_bwp_info;
+}
+
 static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
                                        post_process_pdsch_t *pp_pdsch,
                                        int *n_rb_sched,
@@ -473,6 +501,12 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
   int rbStop = bwp_info.bwpStart + bwp_info.bwpSize - 1;
   int rbSize = 0;
 
+  if (UE->current_DL_BWP.dci_format == NR_DL_DCI_FORMAT_1_1) {
+    nssai_bwp_info_t nssai_bwp_info = get_pdsch_nssai_start_size(nr_mac, UE);
+    rbStart = nssai_bwp_info.prb_start;
+    rbStop = bwp_info.bwpStart + nssai_bwp_info.prb_stop;
+  }
+
   if (reuse_old_tda && layers == new_sched.nrOfLayers) {
     /* Check that there are enough resources for retransmission */
     while (rbSize < new_sched.rbSize) {
@@ -480,10 +514,10 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
       rbSize = 0;
 
       const uint16_t slbitmap = SL_to_bitmap(new_sched.tda_info.startSymbolIndex, new_sched.tda_info.nrOfSymbols);
-      while (rbStart < rbStop && (rballoc_mask[rbStart] & slbitmap))
+      while (rbStart <= rbStop && (rballoc_mask[rbStart] & slbitmap))
         rbStart++;
 
-      if (rbStart >= rbStop) {
+      if (rbStart > rbStop) {
         LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate DL retransmission: no resources\n", UE->rnti, frame, slot);
         return false;
       }
@@ -743,6 +777,13 @@ static void pf_dl(gNB_MAC_INST *mac,
                                     0 /* tb_scaling */,
                                     l) >> 3;
       float coeff_ue = (float) tbs / UE->dl_thr_ue;
+
+      // Apply NSSAI specific scheduling coefficients
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        coeff_ue = coeff_ue * get_nssai_sched_coeff(c->nssai.sst);
+      }
+
       LOG_D(NR_MAC, "[UE %04x][%4d.%2d] b %d, thr_ue %f, tbs %d, coeff_ue %f\n",
             UE->rnti,
             frame,
@@ -817,6 +858,13 @@ static void pf_dl(gNB_MAC_INST *mac,
     int rbStart = 0; // WRT BWP start
     int rbStop = bwp_info.bwpSize - 1;
     int bwp_start = bwp_info.bwpStart;
+
+    if (iterator->UE->current_DL_BWP.dci_format == NR_DL_DCI_FORMAT_1_1) {
+      nssai_bwp_info_t nssai_bwp_info = get_pdsch_nssai_start_size(mac, iterator->UE);
+      rbStart = nssai_bwp_info.prb_start; // WRT BWP start
+      rbStop = nssai_bwp_info.prb_stop;
+    }
+
     // Freq-demain allocation
     while (rbStart < rbStop && (rballoc_mask[rbStart + bwp_start] & slbitmap))
       rbStart++;

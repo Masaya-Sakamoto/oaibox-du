@@ -41,6 +41,35 @@
 #include <openair1/PHY/TOOLS/phy_scope_interface.h>
 #include "PHY/log_tools.h"
 
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
+// OAIBOX SRS_CHANNEL export
+#define OAIBOX_SRS_CHANNEL_EXPORT_ADDRESS "127.0.0.1"
+#define OAIBOX_SRS_CHANNEL_EXPORT_PORT 63139
+int oaibox_srs_channel_export_sockfd;
+struct sockaddr_in oaibox_srs_channel_export_servaddr;
+#define SRS_CHANNEL_BUFFER_SIZE 65535
+
+static bool srs_channel_init = 0;
+
+void init_srs_channel_export()
+{
+  LOG_I(GNB_APP, "OAIBOX: initializing SRS CHANNEL export\n");
+  if ((oaibox_srs_channel_export_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    LOG_E(GNB_APP, "OAIBOX: socket creation failed\n");
+    exit(EXIT_FAILURE);
+  }
+  memset(&oaibox_srs_channel_export_servaddr, 0, sizeof(oaibox_srs_channel_export_servaddr));
+  oaibox_srs_channel_export_servaddr.sin_family = AF_INET;
+  oaibox_srs_channel_export_servaddr.sin_port = htons(OAIBOX_SRS_CHANNEL_EXPORT_PORT);
+  oaibox_srs_channel_export_servaddr.sin_addr.s_addr = inet_addr(OAIBOX_SRS_CHANNEL_EXPORT_ADDRESS);
+}
+
 //#define DEBUG_RXDATA
 //#define SRS_IND_DEBUG
 static void nr_fill_indication(PHY_VARS_gNB *gNB,
@@ -75,7 +104,7 @@ int beam_index_allocation(bool das,
   if (das)
     return fapi_beam_index;
 
-  AssertFatal(IS_BIT_SET(fapi_beam_index, 15), "Can't handle preconfigured DBM yet\n");
+  //AssertFatal(IS_BIT_SET(fapi_beam_index, 15), "Can't handle preconfigured DBM yet\n");
   int ru_beam_idx = fapi_beam_index & 0x7fff;
   int idx = -1;
   for (int j = 0; j < common_vars->num_beams_period; j++) {
@@ -99,6 +128,12 @@ int beam_index_allocation(bool das,
   }
   LOG_D(PHY, "Allocating beam_id[%d] %d in slot %d\n", idx, ru_beam_idx, slot);
   return idx;
+}
+
+// For now, there is only one option, but a parameter must be added that chooses a set of weights between different options.
+static c16_t *get_prec_weights(NR_DL_FRAME_PARMS *fp)
+{
+  return fp->prec_weights;
 }
 
 void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, const nfapi_nr_dl_tti_ssb_pdu *ssb_pdu)
@@ -163,20 +198,23 @@ void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, const n
                                       slot,
                                       fp->symbols_per_slot,
                                       bitmap);
+  c16_t *w = get_prec_weights(fp);
 
-  nr_generate_pss(&txdataF[beam_nb][0][txdataF_offset], gNB->TX_AMP, ssb_start_symbol, cfg, fp);
-  nr_generate_sss(&txdataF[beam_nb][0][txdataF_offset], gNB->TX_AMP, ssb_start_symbol, cfg, fp);
+  nr_generate_pss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP, ssb_start_symbol, cfg, fp, w);
+  nr_generate_sss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP, ssb_start_symbol, cfg, fp, w);
 
   uint16_t slots_per_hf = (fp->slots_per_frame) >> 1;
   int n_hf = slot < slots_per_hf ? 0 : 1;
 
   int hf = fp->Lmax == 4 ? n_hf : 0;
   nr_generate_pbch_dmrs(nr_gold_pbch(fp->Lmax, gNB->gNB_config.cell_config.phy_cell_id.value, hf, ssb_index & 7),
-                        &txdataF[beam_nb][0][txdataF_offset],
+                        txdataF[beam_nb],
+                        txdataF_offset,
                         gNB->TX_AMP,
                         ssb_start_symbol,
                         cfg,
-                        fp);
+                        fp,
+                        w);
 
 #if T_TRACER
   if (T_ACTIVE(T_GNB_PHY_MIB)) {
@@ -190,12 +228,14 @@ void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, const n
 
   nr_generate_pbch(gNB,
                    ssb_pdu,
-                   &txdataF[beam_nb][0][txdataF_offset],
+                   txdataF[beam_nb],
+                   txdataF_offset,
                    ssb_start_symbol,
                    n_hf,
                    frame,
                    cfg,
-                   fp);
+                   fp,
+                   w);
 }
 
 // clearing beam information to be provided to RU for all slots (DL and UL)
@@ -321,7 +361,7 @@ void phy_procedures_gNB_TX(PHY_VARS_gNB *gNB,
         } break;
     }
   }
- 
+
   if (num_pdsch > 0) {
     LOG_D(PHY, "PDSCH generation started (%d) in frame %d.%d\n", num_pdsch, frame, slot);
     nr_generate_pdsch(gNB, num_pdsch, gNB->dlsch, frame, slot);
@@ -1017,6 +1057,7 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx, N
 
   const NR_DL_FRAME_PARMS *frame_parms = &gNB->frame_parms;
   const uint16_t ofdm_symbol_size = frame_parms->ofdm_symbol_size;
+  const uint16_t first_carrier_offset = frame_parms->first_carrier_offset;
   const int nb_symb = frame_parms->symbols_per_slot;
   const uint8_t nb_antennas_rx = frame_parms->nb_antennas_rx;
   LOG_D(PHY,"phy_procedures_gNB_uespec_RX frame %d, slot %d\n",frame_rx,slot_rx);
@@ -1397,6 +1438,59 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx, N
 #endif
     srs->active = false;
     stop_meas(&gNB->rx_srs_stats);
+
+    if (IS_SOFTMODEM_EXPORT_SRS_CHANNEL_ENABLED) {
+      if (!srs_channel_init) {
+        srs_channel_init = true;
+        init_srs_channel_export();
+      }
+
+      struct timespec ts;
+      clock_gettime(CLOCK_REALTIME, &ts);
+      long long timestamp_ns = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+
+      const uint8_t N_ap = 1 << srs_pdu->num_ant_ports;
+      const uint16_t m_SRS_b = get_m_srs(srs_pdu->config_index, srs_pdu->bandwidth_index);
+      const uint16_t Nsc = m_SRS_b * NR_NB_SC_PER_RB;
+
+      for (int ant = 0; ant < frame_parms->nb_antennas_rx; ant++) {
+        for (int p_index = 0; p_index < N_ap; p_index++) {
+          char srs_channel_buffer[SRS_CHANNEL_BUFFER_SIZE];
+          char *output = srs_channel_buffer;
+          const char *end = output + sizeof(srs_channel_buffer);
+
+          output += snprintf(output,
+                             end - output,
+                             "{\"timestamp\":%llu,\"rnti\":\"%04x\",\"frame\":%d,\"slot\":%d,\"tx_port\":%d,\"rx_ant\":%d,\"srs_ch\":[",
+                             timestamp_ns,
+                             srs_pdu->rnti,
+                             srs->frame,
+                             srs->slot,
+                             p_index,
+                             ant);
+
+          c16_t *srs_ch = &srs_estimated_channel_freq[ant][p_index][first_carrier_offset - (ofdm_symbol_size >> 1)];
+          for (int k = 0; k < Nsc; k++) {
+            output += snprintf(output, end - output, "[%d,%d],", srs_ch[k].r, srs_ch[k].i);
+          }
+          output -= 1;
+          output += snprintf(output, end - output, "]}\n");
+
+          long srs_channel_buffer_len = output - srs_channel_buffer;
+          if (srs_channel_buffer_len + 1 < SRS_CHANNEL_BUFFER_SIZE) {
+            sendto(oaibox_srs_channel_export_sockfd,
+                   srs_channel_buffer,
+                   srs_channel_buffer_len,
+                   MSG_DONTWAIT | MSG_NOSIGNAL, // MSG_CONFIRM,
+                   (const struct sockaddr *)&oaibox_srs_channel_export_servaddr,
+                   sizeof(oaibox_srs_channel_export_servaddr));
+            // LOG_I(GNB_APP, "OAIBOX: sending %lu bytes:\n%s\n", srs_channel_buffer_len, srs_channel_buffer);
+          } else {
+            LOG_E(GNB_APP, "OAIBOX: Error sending %lu bytes, buffer too small\n", srs_channel_buffer_len);
+          }
+        }
+      }
+    }
   }
 
   stop_meas(&gNB->phy_proc_rx);

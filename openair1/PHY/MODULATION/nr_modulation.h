@@ -126,6 +126,8 @@ void init_symbol_rotation(NR_DL_FRAME_PARMS *fp);
 
 void init_timeshift_rotation(NR_DL_FRAME_PARMS *fp);
 
+void init_prec_weights(NR_DL_FRAME_PARMS *fp);
+
 void apply_nr_rotation_symbol_RX(const NR_DL_FRAME_PARMS *frame_parms,
                                  c16_t *rxdataF,
                                  const c16_t *rot,
