@@ -1451,6 +1451,12 @@ static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
         physCellId,
         scause);
 
+  /* Validate PCI range per TS 38.331: PhysCellId (0..1007) */
+  if (physCellId < 0 || physCellId > NR_PHYS_CELL_ID_MAX) {
+    LOG_E(NR_RRC, "Invalid physCellId %ld (valid range: 0-%d), rejecting reestablishment request\n", physCellId, NR_PHYS_CELL_ID_MAX);
+    return;
+  }
+
   const nr_rrc_du_container_t *du = get_du_by_assoc_id(rrc, assoc_id);
   if (du == NULL) {
     LOG_E(RRC, "received CCCH message, but no corresponding DU found\n");
