@@ -101,6 +101,9 @@ mui_t rrc_gNB_mui = 0;
 #define NR_C_RNTI_MIN 0x0001
 #define NR_C_RNTI_MAX 0xfff2
 
+/* 5.3.3.3 TS 38.331: Random UE identity mass for 39-bit values */
+#define NR_RRC_RANDOM_VALUE_39_BIT_MASK (0x7fffffffffULL)
+
 /** @brief clone and re-enqueue an NGAP message after delaying
  * delays the ongoing transaction (in msg_p) by setting a timer to wait
  * 10ms; upon expiry, delivers to RRC, which sends the message to itself */
@@ -1650,7 +1653,7 @@ static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
 
 fallback_rrc_setup:
   fill_random(&random_value, sizeof(random_value));
-  random_value = random_value & 0x7fffffffff; /* random value is 39 bits */
+  random_value = random_value & NR_RRC_RANDOM_VALUE_39_BIT_MASK;
 
   ngap_cause_t cause = {.type = NGAP_CAUSE_RADIO_NETWORK, .value = ngap_cause};
   /* request release of the "old" UE in case it exists */
