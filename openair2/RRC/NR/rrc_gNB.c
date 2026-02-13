@@ -1439,6 +1439,10 @@ static const nr_rrc_cell_container_t *get_previous_cell_by_pci_in_du(gNB_RRC_INS
   return rrc_get_cell_by_pci_for_du(&du->cells, pci);
 }
 
+/** @brief Process RRCReestablishmentRequest on CCCH (TS 38.331 clause 5.3.7.4).
+ * On valid UE context, update RNTI and PCell and trigger RRCReestablishment, otherwise
+ * release any old context and send RRCSetup.
+ * @note Context lookup uses c-RNTI only. Out of range PhysCellId or C-RNTI are ignored. */
 static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
                                                  sctp_assoc_t assoc_id,
                                                  const NR_RRCReestablishmentRequest_IEs_t *req,
