@@ -1437,6 +1437,11 @@ static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
                                                  const NR_RRCReestablishmentRequest_IEs_t *req,
                                                  const f1ap_initial_ul_rrc_message_t *msg)
 {
+  DevAssert(req);
+  DevAssert(msg);
+  DevAssert(rrc);
+  RETURN_IF_INVALID_ASSOC_ID(assoc_id);
+
   uint64_t random_value = 0;
   const char *scause = get_reestab_cause(req->reestablishmentCause);
   const long physCellId = req->ue_Identity.physCellId;
