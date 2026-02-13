@@ -97,6 +97,10 @@ mui_t rrc_gNB_mui = 0;
 /* Per-transaction max_delays counter to limit retry attempts */
 #define MAX_DELAYS 100
 
+/* C-RNTI range (0001-FFF2) (TS 38.321 Table 7.1-1) */
+#define NR_C_RNTI_MIN 0x0001
+#define NR_C_RNTI_MAX 0xfff2
+
 /** @brief clone and re-enqueue an NGAP message after delaying
  * delays the ongoing transaction (in msg_p) by setting a timer to wait
  * 10ms; upon expiry, delivers to RRC, which sends the message to itself */
@@ -1462,6 +1466,12 @@ static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
     return;
   }
 
+  /* TS 38.321 Table 7.1-1: out-of-range C-RNTI, ignore request */
+  if (old_rnti < NR_C_RNTI_MIN || old_rnti > NR_C_RNTI_MAX) {
+    LOG_E(NR_RRC, "C-RNTI %04x out of range (0x0001-0xFFF2): rejecting RRCReestablishmentRequest\n", old_rnti);
+    return;
+  }
+
   const nr_rrc_du_container_t *du = get_du_by_assoc_id(rrc, assoc_id);
   if (du == NULL) {
     LOG_E(RRC, "received CCCH message, but no corresponding DU found\n");
@@ -1476,12 +1486,6 @@ static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
           msg->nr_cellid,
           assoc_id);
     return;
-  }
-
-  // Validate C-RNTI range (3GPP TS 38.321 version 15.13.0 Section 7.1 Table 7.1-1)
-  if (old_rnti < 0x1 || old_rnti > 0xffef) {
-    LOG_E(NR_RRC, "NR_RRCReestablishmentRequest c_RNTI %04x range error, fallback to RRC setup\n", old_rnti);
-    goto fallback_rrc_setup;
   }
 
   if (current_cell->mtc == NULL) {
