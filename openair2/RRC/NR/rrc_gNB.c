@@ -1510,6 +1510,21 @@ static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
     goto fallback_rrc_setup;
   }
 
+  /* TS 38.331 5.3.7.1: requires a retrieved valid UE context. Context without
+   * SRB2 or any DRB is incomplete for re-establishment (UE initiation needs both,
+   * treat as not verified). */
+  if (!UE->Srb[SRB2].Active) {
+    LOG_E(NR_RRC, "UE context not valid for re-establishment (no SRB2), fallback to RRC setup\n");
+    ngap_cause = NGAP_CAUSE_RADIO_NETWORK_RELEASE_DUE_TO_NGRAN_GENERATED_REASON;
+    goto fallback_rrc_setup;
+  }
+
+  if (seq_arr_size(&UE->drbs) == 0) {
+    LOG_E(NR_RRC, "UE context not valid for re-establishment (no DRB), fallback to RRC setup\n");
+    ngap_cause = NGAP_CAUSE_RADIO_NETWORK_RELEASE_DUE_TO_NGRAN_GENERATED_REASON;
+    goto fallback_rrc_setup;
+  }
+
   f1_ue_data_t ue_data = cu_get_f1_ue_data(UE->rrc_ue_id);
 
   nr_ho_source_cu_t *source_ctx = UE->ho_context ? UE->ho_context->source : NULL;
