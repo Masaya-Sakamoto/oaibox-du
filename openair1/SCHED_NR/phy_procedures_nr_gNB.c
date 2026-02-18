@@ -143,7 +143,8 @@ void nr_common_signal_procedures(PHY_VARS_gNB *gNB, int frame, int slot, nfapi_n
                                       fp->symbols_per_slot,
                                       bitmap);
   c16_t *w = get_prec_weights(fp);
-  int16_t beam_amp = pb->prgs_list[0].dig_bf_interface_list[0].beam_idx == 0 ? -10 : 0;
+  int16_t beam_amp = 0;
+  // beam_amp = pb->prgs_list[0].dig_bf_interface_list[0].beam_idx == 0 ? -20 : -10;
   nr_generate_pss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP+beam_amp, ssb_start_symbol, cfg, fp, w);
   nr_generate_sss(txdataF[beam_nb], txdataF_offset, gNB->TX_AMP+beam_amp, ssb_start_symbol, cfg, fp, w);
 

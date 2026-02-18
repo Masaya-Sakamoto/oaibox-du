@@ -1,35 +1,34 @@
 //
 // Created by user on 14/10/21.
+// Modified for file output
 //
 #ifndef OAIBOX_DATA_EXPORT
 #define OAIBOX_DATA_EXPORT
 
-#include <arpa/inet.h> // inet_addr()
-#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> // bzero()
-#include <sys/socket.h>
 #include <sys/time.h>
-#include <unistd.h> // read(), write(), close()
+#include <time.h>
+#include <unistd.h> // usleep()
 
 #include <softmodem-common.h>
 #include "LAYER2/NR_MAC_gNB/mac_proto.h"
 #include "openair2/RRC/NR/rrc_gNB_UE_context.h"
 #include "PHY/defs_gNB.h"
 
-#define ADDRESS "127.0.0.1"
-#define PORT 63136
+// ソケット設定の代わりにファイルパスを定義
+#define OUTPUT_FILE_PREFIX "/tmp/oaibox_stats"
 #define UPDATE_INTERVAL 1000 // Milliseconds
 #define BUFFER_SIZE 65535
 
-void func(int sockfd)
+// 引数を sockfd から FILE* に変更
+void func(FILE *fp)
 {
-  int ret = 0;
   uint64_t timestamp = 0;
 
-  do {
+  // ループ条件: グローバルな終了フラグ(oai_exit)のみチェック
+  while (!oai_exit) {
     // Get useconds until the next run and usleep for that amount of time
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -177,11 +176,11 @@ void func(int sockfd)
 
       // I/Q symbols
       if (IS_SOFTMODEM_EXPORT_MOD_SYMBOLS_ENABLED) {
+        // 注: オリジナルのロジックは長いのでそのまま保持します
         buffer_len = strlen(buffer);
         snprintf(&buffer[buffer_len], BUFFER_SIZE - buffer_len, ", \"modSymbols\": [");
         NR_gNB_PUSCH *pusch = &RC.gNB[0]->pusch_vars[0];
         int buffer_length = ceil_mod(pusch->rb_size * NR_NB_SC_PER_RB, 16);
-        // The 100 is adjustable to choose the maximum number of symbols sent
         int k_factor = max((pusch->num_symbols * pusch->rb_size * NR_NB_SC_PER_RB) / 1000, 1);
         for (int symbol = pusch->start_symbol; symbol < pusch->start_symbol + pusch->num_symbols; symbol++) {
           c16_t *pusch_dataF = (c16_t *)&pusch->rxdataF_comp[0][symbol * buffer_length];
@@ -218,55 +217,54 @@ void func(int sockfd)
     buffer_len = strlen(buffer);
     snprintf(&buffer[buffer_len], BUFFER_SIZE - buffer_len, " \"timestamp\": %ju}\n", timestamp / 1000);
 
+    // ソケット送信 (write) を ファイル書き込み (fprintf) に変更
     buffer_len = strlen(buffer);
     if (buffer_len + 1 < BUFFER_SIZE) {
-      ret = write(sockfd, buffer, strlen(buffer));
-      // printf("OAIBOX: sending %u bytes:\n%s\n", buffer_len, buffer);
+      if (fprintf(fp, "%s", buffer) < 0) {
+          printf("OAIBOX: Error writing to file\n");
+      }
+      // 重要: バッファリングせず即時ディスクに書き込む
+      fflush(fp);
     } else {
-      printf("OAIBOX: Error sending %u bytes, buffer too small\n", buffer_len);
+      printf("OAIBOX: Error preparing buffer, buffer too small\n");
     }
 
-  } while (ret >= 0 && !oai_exit);
-
-  printf("OAIBOX: Error sending data to socket!");
+  } // End while(!oai_exit)
 }
 
 void *oaibox_data_export_func()
 {
-  // A SIGPIPE is sent to a process if it tried to write to a socket that had been shutdown for writing or isn't connected
-  // (anymore). Do not exit program when a SIGPIPE is received
-  sigaction(SIGPIPE, &(struct sigaction){{SIG_IGN}}, NULL);
+  // SIGPIPE処理はファイル書き込みでは不要なため削除可能ですが、
+  // 他のスレッドへの影響を避けるため残しても無害です。
+  // sigaction(SIGPIPE, &(struct sigaction){{SIG_IGN}}, NULL);
 
-  while (!oai_exit) {
-    // Socket creation and verification
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-      printf("OAIBOX: socket creation failed...\n");
-    } else {
-      printf("OAIBOX: socket successfully created\n");
+  char filename[256];
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
 
-      struct sockaddr_in server_addr;
-      bzero((char *)&server_addr, sizeof(server_addr));
-      server_addr.sin_family = AF_INET;
-      server_addr.sin_addr.s_addr = inet_addr(ADDRESS);
-      server_addr.sin_port = htons(PORT);
-
-      // Connect the client socket to server socket
-      if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        printf("OAIBOX: connection with the server failed...\n");
-      } else {
-        printf("OAIBOX: connected to the server\n");
-
-        // Function for send/receive data
-        func(sockfd);
-      }
-    }
-
-    // Close the socket
-    close(sockfd);
-
-    sleep(5);
+  // ファイル名を生成 (例: /tmp/oaibox_stats_20231027_153000.json)
+  // %Y=年, %m=月, %d=日, %H=時, %M=分, %S=秒
+  if (strftime(filename, sizeof(filename), OUTPUT_FILE_PREFIX "_%Y%m%d_%H%M%S.json", t) == 0) {
+      // 万が一バッファ不足等で生成失敗した場合はデフォルト名を使用
+      sprintf(filename, "%s_unknown.json", OUTPUT_FILE_PREFIX);
   }
+
+  printf("OAIBOX: Opening file for data export: %s\n", filename);
+
+  // ファイルを書き込みモード("w")でオープン。
+  // 既存の内容を消したくない場合は "a" (append) に変更してください。
+  FILE *fp = fopen(filename, "w");
+  if (fp == NULL) {
+    perror("OAIBOX: Failed to open output file");
+    return NULL;
+  }
+
+  // データ収集・書き込みループへ
+  func(fp);
+
+  // ループを抜けたらクローズ
+  fclose(fp);
+  printf("OAIBOX: Data export finished.\n");
 
   return NULL;
 }
