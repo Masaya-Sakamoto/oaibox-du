@@ -103,8 +103,8 @@ MACRLCs:
     - num_cc: 1
       tr_s_preference: local_L1
       tr_n_preference: f1
-      local_n_address: 192.168.1.20
-      remote_n_address: 192.168.1.10
+      local_n_address: 192.168.0.20
+      remote_n_address: 192.168.0.10
       local_n_portc: 501
       local_n_portd: 2152
       remote_n_portc: 500
@@ -141,7 +141,7 @@ RUs:
       gpio_controller: tmytek
       clock_src: gpsdo
       time_src: gpsdo
-      sdr_addrs: type=x4xx,serial=3445665,model=X410,mgmt_addr=192.168.10.2,addr=192.168.10.2,second_addr=192.168.11.2,clock_source=internal,time_source=internal
+      sdr_addrs: type=x4xx,serial=3445665,model=X410,mgmt_addr=192.168.11.2,addr=192.168.11.2,clock_source=internal,time_source=internal
 opt:
     type: none
     address: 127.0.0.1
@@ -164,5 +164,5 @@ log_config:
     gtpu_log_level: info
 e2_agent:
     near_ric_ip_addr: 192.168.1.10
-    local_ip_addr: 192.168.1.20
+    local_ip_addr: 192.168.1.12
     sm_dir: /usr/local/lib/flexric/
