@@ -1628,12 +1628,24 @@ void RCconfig_nr_macrlc(configmodule_interface_t *cfg)
           AssertFatal(NFAPI_MODE == NFAPI_MONOLITHIC, "Analog beamforming only supported for monolithic scenario\n");
         NR_beam_info_t *beam_info = &RC.nrmac[j]->beam_info;
         int beams_per_period = *MacRLC_ParamList.paramarray[j][MACRLC_ANALOG_BEAMS_PERIOD_IDX].u8ptr;
-        beam_info->beam_allocation = malloc16(beams_per_period * sizeof(beam_info->beam_allocation));
-        beam_info->beam_duration = *MacRLC_ParamList.paramarray[j][MACRLC_ANALOG_BEAM_DURATION_IDX].u8ptr;
+        beam_info->beam_allocation = malloc16(beams_per_period * sizeof(*beam_info->beam_allocation));
+        int duration = *MacRLC_ParamList.paramarray[j][MACRLC_ANALOG_BEAM_DURATION_IDX].i8ptr;
+        AssertFatal(duration > -15 && duration != 0, "Invalid beam duration %d\n", duration);
+        beam_info->beam_slot_duration = duration > 0 ? duration : 1;
+        beam_info->beam_symbol_duration = duration < 0 ? -duration : 0;
         beam_info->beams_per_period = beams_per_period;
-        beam_info->beam_allocation_size = -1; // to be initialized once we have information on frame configuration
+        beam_info->beam_allocation_size[0] = -1; // to be initialized once we have information on frame configuration
+        beam_info->beam_allocation_size[1] = -1;
         // TODO: Indicate this to MAC via FAPI TLV 0x0164.
         beam_info->beam_mode = ab == 1 ? PRECONFIGURED_BEAM_IDX : LOPHY_BEAM_IDX;
+        LOG_I(GNB_APP,
+              "Beam configuration: mode=%s, duration=%d (%s, %d %s), beams_per_period=%d\n",
+              beam_info->beam_mode == PRECONFIGURED_BEAM_IDX ? "preconfigured" : "lophy",
+              duration,
+              duration > 0 ? "slot-level" : "symbol-level",
+              duration > 0 ? duration : -duration,
+              duration > 0 ? "slot(s)" : "symbol(s)",
+              beams_per_period);
       } else {
         RC.nrmac[j]->beam_info.beam_mode = NO_BEAM_MODE;
       }

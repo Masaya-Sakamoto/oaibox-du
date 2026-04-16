@@ -446,12 +446,12 @@ nssai_bwp_info_t get_pdsch_nssai_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *
   return nssai_bwp_info;
 }
 
-static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
-                                       post_process_pdsch_t *pp_pdsch,
-                                       int *n_rb_sched,
-                                       NR_UE_info_t *UE,
-                                       int beam_idx,
-                                       int current_harq_pid)
+static NR_rtx_ret_t allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
+                                               post_process_pdsch_t *pp_pdsch,
+                                               NR_UE_info_t *UE,
+                                               int dci_beam_idx,
+                                               int current_harq_pid,
+                                               int slots_per_frame)
 {
   frame_t frame = pp_pdsch->frame;
   slot_t slot = pp_pdsch->slot;
@@ -485,8 +485,9 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
                                            TYPE_C_RNTI_,
                                            coresetid,
                                            false);
+  NR_rtx_ret_t ret = {0};
   if (!temp_tda.valid_tda)
-    return false;
+    return ret;
 
   bool reuse_old_tda = (new_sched.tda_info.startSymbolIndex == temp_tda.startSymbolIndex) && (new_sched.tda_info.nrOfSymbols <= temp_tda.nrOfSymbols);
   LOG_D(NR_MAC, "[UE %x] %s old TDA, %s number of layers\n",
@@ -494,12 +495,12 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
         reuse_old_tda ? "reuse" : "do not reuse",
         layers == new_sched.nrOfLayers ? "same" : "different");
 
-  uint16_t *rballoc_mask = nr_mac->common_channels[CC_id].vrb_map[beam_idx];
-
   bwp_info_t bwp_info = get_pdsch_bwp_start_size(nr_mac, UE);
   int rbStart = bwp_info.bwpStart;
   int rbStop = bwp_info.bwpStart + bwp_info.bwpSize - 1;
   int rbSize = 0;
+  uint16_t *rballoc_mask = NULL;
+  NR_beam_alloc_t beam = {0};
 
   if (UE->current_DL_BWP.dci_format == NR_DL_DCI_FORMAT_1_1) {
     nssai_bwp_info_t nssai_bwp_info = get_pdsch_nssai_start_size(nr_mac, UE);
@@ -508,6 +509,16 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
   }
 
   if (reuse_old_tda && layers == new_sched.nrOfLayers) {
+    beam = beam_allocation_procedure(&nr_mac->beam_info,
+                                     frame,
+                                     slot,
+                                     new_sched.tda_info.startSymbolIndex,
+                                     new_sched.tda_info.nrOfSymbols,
+                                     UE->UE_beam_index,
+                                     slots_per_frame);
+    if (beam.idx < 0)
+      return ret;
+    rballoc_mask = nr_mac->common_channels[CC_id].vrb_map[beam.idx];
     /* Check that there are enough resources for retransmission */
     while (rbSize < new_sched.rbSize) {
       rbStart += rbSize; /* last iteration rbSize was not enough, skip it */
@@ -519,7 +530,8 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
 
       if (rbStart > rbStop) {
         LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate DL retransmission: no resources\n", UE->rnti, frame, slot);
-        return false;
+        reset_beam_status(&nr_mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame, beam.new_beam);
+        return ret;
       }
 
       while (rbStart + rbSize <= rbStop && !(rballoc_mask[rbStart + rbSize] & slbitmap) && rbSize < new_sched.rbSize)
@@ -527,6 +539,16 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
       DevAssert(rbSize > 0);
     }
   } else {
+    beam = beam_allocation_procedure(&nr_mac->beam_info,
+                                     frame,
+                                     slot,
+                                     temp_tda.startSymbolIndex,
+                                     temp_tda.nrOfSymbols,
+                                     UE->UE_beam_index,
+                                     slots_per_frame);
+    if (beam.idx < 0)
+      return ret;
+    rballoc_mask = nr_mac->common_channels[CC_id].vrb_map[beam.idx];
     /* the retransmission will use a different time domain allocation, check
      * that we have enough resources */
     NR_pdsch_dmrs_t temp_dmrs = get_dl_dmrs_params(scc, dl_bwp, &temp_tda, layers);
@@ -537,7 +559,8 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
 
     if (rbStart >= rbStop) {
       LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not allocate DL retransmission: no resources\n", UE->rnti, frame, slot);
-      return false;
+      reset_beam_status(&nr_mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame, beam.new_beam);
+      return ret;
     }
 
     while (rbStart + rbSize <= rbStop && !(rballoc_mask[rbStart + rbSize] & slbitmap))
@@ -565,7 +588,8 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
             slot,
             new_tbs,
             new_sched.tb_size);
-      return false; /* the maximum TBsize we might have is smaller than what we need */
+      reset_beam_status(&nr_mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame, beam.new_beam);
+      return ret; /* the maximum TBsize we might have is smaller than what we need */
     }
 
     /* we can allocate it. Overwrite the time_domain_allocation, the number
@@ -585,15 +609,16 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
                                slot,
                                UE->rnti,
                                &sched_ctrl->aggregation_level,
-                               beam_idx,
+                               dci_beam_idx,
                                sched_ctrl->search_space,
                                sched_ctrl->coreset,
                                &sched_ctrl->sched_pdcch,
                                sched_ctrl->pdcch_cl_adjust);
   if (CCEIndex<0) {
     sched_ctrl->dl_cce_fail++;
+    reset_beam_status(&nr_mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame, beam.new_beam);
     LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not find free CCE for DL DCI retransmission\n", UE->rnti, frame, slot);
-    return false;
+    return ret;
   }
 
   /* Find PUCCH occasion: if it fails, undo CCE allocation (undoing PUCCH
@@ -604,13 +629,14 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
     int r_pucch = nr_get_pucch_resource(sched_ctrl->coreset, ul_bwp->pucch_Config, CCEIndex);
     alloc = nr_acknack_scheduling(nr_mac, UE, frame, slot, UE->UE_beam_index, r_pucch, 0);
     if (alloc < 0) {
+      reset_beam_status(&nr_mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame, beam.new_beam);
       LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not find PUCCH for DL DCI retransmission\n", UE->rnti, frame, slot);
-      return false;
+      return ret;
     }
   }
 
   sched_ctrl->cce_index = CCEIndex;
-  fill_pdcch_vrb_map(nr_mac, CC_id, &sched_ctrl->sched_pdcch, CCEIndex, sched_ctrl->aggregation_level, beam_idx);
+  fill_pdcch_vrb_map(nr_mac, CC_id, &sched_ctrl->sched_pdcch, CCEIndex, sched_ctrl->aggregation_level, dci_beam_idx);
 
   new_sched.rbStart = rbStart - bwp_info.bwpStart;
   new_sched.pucch_allocation = alloc;
@@ -619,12 +645,12 @@ static bool allocate_dl_retransmission(gNB_MAC_INST *nr_mac,
   post_process_dlsch(nr_mac, pp_pdsch, UE, &new_sched);
 
   /* retransmissions: directly allocate */
-  *n_rb_sched -= new_sched.rbSize;
-
-  for (int rb = rbStart; rb < new_sched.rbSize; rb++)
+  ret.rbsize = new_sched.rbSize;
+  ret.valid = true;
+  ret.beam_idx = beam.idx;
+  for (int rb = rbStart; rb < rbStart + new_sched.rbSize; rb++)
     rballoc_mask[rb] |= SL_to_bitmap(new_sched.tda_info.startSymbolIndex, new_sched.tda_info.nrOfSymbols);
-
-  return true;
+  return ret;
 }
 
 static void ack_reconfig(gNB_MAC_INST *mac, NR_UE_info_t *UE)
@@ -724,18 +750,25 @@ static void pf_dl(gNB_MAC_INST *mac,
 
     /* retransmission */
     if (harq_pid >= 0) {
-      NR_beam_alloc_t beam = beam_allocation_procedure(&mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame);
-      bool sch_ret = beam.idx >= 0;
+      NR_beam_alloc_t dci_beam = beam_allocation_procedure(&mac->beam_info,
+                                                           frame,
+                                                           slot,
+                                                           sched_ctrl->sched_pdcch.StartSymbolIndex,
+                                                           sched_ctrl->sched_pdcch.DurationSymbols,
+                                                           UE->UE_beam_index,
+                                                           slots_per_frame);
+      if (dci_beam.idx < 0)
+        continue;
       /* Allocate retransmission */
-      if (sch_ret)
-        sch_ret = allocate_dl_retransmission(mac, pp_pdsch, &n_rb_sched[beam.idx], UE, beam.idx, harq_pid);
-      if (!sch_ret) {
+      NR_rtx_ret_t ret = allocate_dl_retransmission(mac, pp_pdsch, UE, dci_beam.idx, harq_pid, slots_per_frame);
+      if (!ret.valid) {
         LOG_D(NR_MAC, "[UE %04x][%4d.%2d] DL retransmission could not be allocated\n", UE->rnti, frame, slot);
-        reset_beam_status(&mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame, beam.new_beam);
+        reset_beam_status(&mac->beam_info, frame, slot, UE->UE_beam_index, slots_per_frame, dci_beam.new_beam);
         continue;
       }
       /* reduce max_num_ue once we are sure UE can be allocated, i.e., has CCE */
-      remainUEs[beam.idx]--;
+      remainUEs[ret.beam_idx]--;
+      n_rb_sched[ret.beam_idx] -= ret.rbsize;
 
     } else {
       /* skip this UE if there are no free HARQ processes. This can happen e.g.
@@ -749,7 +782,7 @@ static void pf_dl(gNB_MAC_INST *mac,
         continue;
       }
 
-      update_dlsch_buffer(pp_pdsch->frame, pp_pdsch->slot, UE);
+      update_dlsch_buffer(frame, slot, UE);
 
       if (!dlsch_to_schedule(sched_ctrl, frame))
         continue;
@@ -823,15 +856,14 @@ static void pf_dl(gNB_MAC_INST *mac,
       continue;
     }
 
-    NR_beam_alloc_t beam = beam_allocation_procedure(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame);
-
-    if (beam.idx < 0) {
-      // no available beam
-      iterator++;
-      continue;
-    }
-    if (remainUEs[beam.idx] == 0 || n_rb_sched[beam.idx] < min_rbSize) {
-      reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, beam.new_beam);
+    NR_beam_alloc_t dci_beam = beam_allocation_procedure(&mac->beam_info,
+                                                         frame,
+                                                         slot,
+                                                         sched_ctrl->sched_pdcch.StartSymbolIndex,
+                                                         sched_ctrl->sched_pdcch.DurationSymbols,
+                                                         iterator->UE->UE_beam_index,
+                                                         slots_per_frame);
+    if (dci_beam.idx < 0) {
       iterator++;
       continue;
     }
@@ -850,6 +882,26 @@ static void pf_dl(gNB_MAC_INST *mac,
                                             coresetid,
                                             false);
     AssertFatal(tda_info.valid_tda, "Invalid TDA from get_dl_tda_info\n");
+
+    NR_beam_alloc_t beam = beam_allocation_procedure(&mac->beam_info,
+                                                     frame,
+                                                     slot,
+                                                     tda_info.startSymbolIndex,
+                                                     tda_info.nrOfSymbols,
+                                                     iterator->UE->UE_beam_index,
+                                                     slots_per_frame);
+
+    if (beam.idx < 0) {
+      reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, dci_beam.new_beam);
+      iterator++;
+      continue;
+    }
+    if (remainUEs[beam.idx] == 0 || n_rb_sched[beam.idx] < min_rbSize) {
+      reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, dci_beam.new_beam);
+      reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, beam.new_beam);
+      iterator++;
+      continue;
+    }
 
     const uint16_t slbitmap = SL_to_bitmap(tda_info.startSymbolIndex, tda_info.nrOfSymbols);
 
@@ -883,6 +935,7 @@ static void pf_dl(gNB_MAC_INST *mac,
             rbStart,
             max_rbSize,
             rbStop);
+      reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, dci_beam.new_beam);
       reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, beam.new_beam);
       iterator++;
       continue;
@@ -893,7 +946,7 @@ static void pf_dl(gNB_MAC_INST *mac,
                                  slot,
                                  iterator->UE->rnti,
                                  &sched_ctrl->aggregation_level,
-                                 beam.idx,
+                                 dci_beam.idx,
                                  sched_ctrl->search_space,
                                  sched_ctrl->coreset,
                                  &sched_ctrl->sched_pdcch,
@@ -901,6 +954,7 @@ static void pf_dl(gNB_MAC_INST *mac,
     if (CCEIndex < 0) {
       sched_ctrl->dl_cce_fail++;
       LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not find free CCE for DL DCI\n", rnti, frame, slot);
+      reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, dci_beam.new_beam);
       reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, beam.new_beam);
       iterator++;
       continue;
@@ -915,6 +969,7 @@ static void pf_dl(gNB_MAC_INST *mac,
       alloc = nr_acknack_scheduling(mac, iterator->UE, frame, slot, iterator->UE->UE_beam_index, r_pucch, 0);
       if (alloc < 0) {
         LOG_D(NR_MAC, "[UE %04x][%4d.%2d] could not find PUCCH for DL DCI\n", rnti, frame, slot);
+        reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, dci_beam.new_beam);
         reset_beam_status(&mac->beam_info, frame, slot, iterator->UE->UE_beam_index, slots_per_frame, beam.new_beam);
         iterator++;
         continue;
@@ -922,7 +977,7 @@ static void pf_dl(gNB_MAC_INST *mac,
     }
 
     sched_ctrl->cce_index = CCEIndex;
-    fill_pdcch_vrb_map(mac, CC_id, &sched_ctrl->sched_pdcch, CCEIndex, sched_ctrl->aggregation_level, beam.idx);
+    fill_pdcch_vrb_map(mac, CC_id, &sched_ctrl->sched_pdcch, CCEIndex, sched_ctrl->aggregation_level, dci_beam.idx);
 
     int l = get_dl_nrOfLayers(sched_ctrl, dl_bwp->dci_format);
     NR_sched_pdsch_t sched_pdsch = {
