@@ -71,7 +71,7 @@ if [ "${MODE}" = "do-ra" ]; then
   echo "--- Starting UE ---"
   "${BUILD}/nr-uesoftmodem" \
     --rfsim --do-ra --noS1 \
-    --rfsimulator.[0].serveraddr 127.0.0.1 \
+    --rfsimulator.serveraddr 127.0.0.1 \
     --log_config.global_log_options level,nocolor,time \
     > "${LOG_UE}" 2>&1 &
   UE_PID=$!
@@ -133,8 +133,11 @@ if [ "${MODE}" = "do-ra" ]; then
     echo "  [PASS] RA procedure completed successfully"
   else
     echo "  [FAIL] RA procedure did not complete"
-    echo "  --- Last 10 lines of gNB log ---"
-    tail -10 "${LOG_GNB}"
+    echo "  --- Last 100 lines of gNB log ---"
+    tail -100 "${LOG_GNB}"
+    echo "  ---------------------------------"
+    echo "  --- Last 100 lines of UE log ---"
+    tail -100 "${LOG_UE}"
     RESULT=1
   fi
 fi
