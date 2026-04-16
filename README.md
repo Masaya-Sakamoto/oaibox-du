@@ -96,3 +96,214 @@ Your email should contain below information:
 - Known/open issues are present on [GitLab](https://gitlab.eurecom.fr/oai/openairinterface5g/-/issues), so keep checking.
 
 Always remember a structured email will help us understand your issues quickly.
+
+# OAIBOX-DU Symbol-Level Beam Scheduling Port Note #
+
+This repository contains a backport of the MAC-layer symbol-level beam ID control scheduling changes from
+`beam_symbol_switch_2026_w15` into `oaibox-du` (based on the older `2026.w07` line).
+
+The goal of this port is to let MAC reserve beam resources with symbol granularity, instead of assuming that
+one beam decision always occupies the whole slot. In practice, this matters because the following can now be
+handled independently inside the same slot when resources do not overlap in time:
+
+- PDCCH/DCI beam reservation
+- PDSCH/PUSCH beam reservation
+- PRACH reservation
+- Msg2/Msg3/Msg4 random-access related reservations
+- PUCCH/SRS/CSI-RS reservations
+
+The port keeps the existing `oaibox-du` specific behavior intact where possible, especially:
+
+- the numeric `set_analog_beamforming` configuration style
+- NSSAI/slice-aware RB range handling in DL/UL scheduling
+- existing OAIBOX-specific scheduler tuning and logging
+
+## Configuration Semantics ##
+
+The beam scheduler is enabled through the existing MACRLC configuration block.
+
+- `set_analog_beamforming = 2` means LoPHY beam index mode in `oaibox-du`
+- `beam_duration > 0` means slot-level allocation
+- `beam_duration < 0` means symbol-level allocation, and `abs(beam_duration)` is the symbol group size
+- `beam_duration = 0` is invalid and rejected during configuration
+- `beams_per_period` is the number of parallel beam "planes" the scheduler can use for the same time region
+
+Example:
+
+```conf
+MACRLCs = ({
+  set_analog_beamforming = 2;
+  beam_duration = -7;
+  beams_per_period = 2;
+  beam_weights = [0];
+});
+```
+
+With `beam_duration = -7`, one slot is split into two symbol groups:
+
+- group 0: symbols 0..6
+- group 1: symbols 7..13
+
+This allows, for example, an early-symbol DCI reservation and a later-symbol PDSCH/PUSCH reservation to be
+tracked separately.
+
+## What Was Ported ##
+
+The main functional changes are:
+
+- `openair2/LAYER2/NR_MAC_gNB/nr_mac_gNB.h`
+- `openair2/LAYER2/NR_MAC_gNB/mac_proto.h`
+- `openair2/LAYER2/NR_MAC_gNB/config.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_primitives.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_bch.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_dlsch.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_ulsch.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_RA.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_uci.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_srs.c`
+- `openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_phytest.c`
+- `openair2/GNB_APP/MACRLC_nr_paramdef.h`
+- `openair2/GNB_APP/gnb_config.c`
+
+The high-level behavior is now:
+
+- beam reservation is performed with `(frame, slot, start_symbol, nb_symbols, beam_id)`
+- DCI/PDCCH beam reservation is separated from PDSCH/PUSCH beam reservation
+- retransmission helpers return enough information to undo only the newly reserved beam groups
+- RA scheduling reserves beams using the real time-domain allocation of PRACH, Msg2, Msg3 and Msg4
+- long PRACH formats reserve beam occupancy across all affected slots
+
+## `nr_mac_gNB.h` Design Intent ##
+
+The most important structural change is in `NR_beam_info_t`.
+
+Previous behavior assumed a 2D allocation model:
+
+- one axis for "beam period"
+- one axis for "time bucket"
+
+That was enough for slot-level beam scheduling, but it was not enough once one slot had to be split into
+multiple independently reservable symbol groups.
+
+The new structure is:
+
+```c
+typedef struct {
+  int16_t ***beam_allocation;
+  int beam_slot_duration;
+  int beam_symbol_duration;
+  int beams_per_period;
+  int beam_allocation_size[2];
+  nr_beam_mode_t beam_mode;
+} NR_beam_info_t;
+```
+
+The intended meaning is:
+
+- `beam_allocation[beam_period_idx][slot_group_idx][symbol_group_idx]`
+- stored value: requested beam ID
+- stored value `-1`: this entry is free
+
+So `beam_allocation` is no longer "a list of beams per period" only; it is a 3D occupancy table.
+
+The three axes are:
+
+- `beam_period_idx`
+  This selects one of the `beams_per_period` parallel beam allocation planes.
+- `slot_group_idx`
+  This is the time axis across slots. It is grouped by `beam_slot_duration`.
+- `symbol_group_idx`
+  This is the sub-slot axis inside one slot. It is grouped by `beam_symbol_duration`.
+
+The reason `beam_allocation_size` is now `int beam_allocation_size[2]` is exactly to describe the sizes of the
+last two axes of that 3D table:
+
+- `beam_allocation_size[0]`
+  Number of slot groups on the slot axis.
+  Computed as `20ms_window_in_slots / beam_slot_duration`.
+  In the current implementation, the window is `slots_per_frame * 2`, following the original 20 ms periodic
+  allocation model used by the source branch.
+- `beam_allocation_size[1]`
+  Number of symbol groups inside one slot.
+  Computed as `14 / symbol_group_size`.
+  Slot-level mode uses `1`, because the whole slot is one group.
+
+Concrete examples:
+
+- slot-level mode with `beam_duration = 1`
+  `beam_slot_duration = 1`, `beam_symbol_duration = 0`, `beam_allocation_size[1] = 1`
+- symbol-level mode with `beam_duration = -7`
+  `beam_slot_duration = 1`, `beam_symbol_duration = 7`, `beam_allocation_size[1] = 2`
+- symbol-level mode with `beam_duration = -2`
+  `beam_slot_duration = 1`, `beam_symbol_duration = 2`, `beam_allocation_size[1] = 7`
+
+`beam_allocation_size[2]` is admittedly not a very descriptive name by itself. It was kept in array form to
+stay close to the source branch and to keep the allocation/reset loops generic with minimal divergence during
+the backport. The semantic interpretation in this repository is:
+
+- `beam_allocation_size[0] = slot-axis size`
+- `beam_allocation_size[1] = symbol-axis size`
+
+If this area is refactored later, a more explicit representation such as:
+
+- `beam_slot_axis_size`
+- `beam_symbol_axis_size`
+
+would likely improve readability without changing the behavior.
+
+Two related changes are also important:
+
+- `NR_beam_alloc_t.new_beam` is now a bitmap, not a boolean
+- each bit in `new_beam` corresponds to one `symbol_group_idx`
+
+This lets the scheduler free only the symbol groups that were newly reserved by the current allocation attempt.
+That is why reset paths can now undo partial reservations safely, instead of dropping an entire slot-wide beam
+state.
+
+## Scheduler Behavior After the Port ##
+
+After this port, the practical scheduling rule is:
+
+- reserve the control-region beam using the real PDCCH start symbol and duration
+- reserve the data-region beam using the real PDSCH/PUSCH/PUCCH/SRS/CSI-RS start symbol and duration
+- allow both to coexist only if they do not conflict in the same occupancy table entry
+
+This is especially visible in RA:
+
+- PRACH uses the PRACH symbol span, and long PRACH occupies all affected slots
+- Msg3 uses UL TDA symbols for PUSCH and PDCCH symbols for its DCI separately
+- Msg2 and Msg4/MsgB reserve DCI and PDSCH beams separately
+
+## Tests and Validation ##
+
+The following validation artifacts were added:
+
+- `openair2/LAYER2/NR_MAC_gNB/tests/test_beam_symbol_alloc.c`
+- `openair2/LAYER2/NR_MAC_gNB/tests/run_beam_symbol_test.sh`
+- `ci-scripts/conf_files/gnb.band78.106prb.rfsim.beam-symbol.conf`
+
+Validation status for this port:
+
+- self-contained unit test for beam allocation/reset logic: added and passing
+- shell syntax check for RFsim smoke script: passing
+- repository-wide build in `oaibox-du`: confirmed successful after the port
+- RFsim smoke-test script: added for follow-up runtime validation
+
+The unit test covers:
+
+- slot-level regression behavior
+- symbol-level allocation behavior
+- non-overlapping symbol-group coexistence
+- reset of only the symbol groups newly reserved by the current allocation
+- DCI/PDSCH split-style allocation behavior
+
+## Notes for Future Maintainers ##
+
+When working on this area, the most important thing to remember is:
+
+- a "beam allocation" is no longer synonymous with "this whole slot uses that beam"
+
+Any new scheduler path that reserves radio resources should pass the real time-domain allocation to
+`beam_allocation_procedure()`. If a path falls back to slot-only assumptions, it can silently reintroduce false
+conflicts or leak beam reservations across unrelated symbol regions.
