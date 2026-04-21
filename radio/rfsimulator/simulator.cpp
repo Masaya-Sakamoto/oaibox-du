@@ -43,6 +43,7 @@
 #include <errno.h>
 #include <sys/epoll.h>
 #include <netdb.h>
+#include <ctype.h>
 
 #include <common/utils/assertions.h>
 #include <common/utils/LOG/log.h>
@@ -61,6 +62,7 @@ extern int get_currentchannels_type(const char *buf,
 #include <queue>
 #include <mutex>
 #include <vector>
+#include <fstream>
 #include <sstream>
 #include <algorithm>
 #include <numeric>
@@ -90,6 +92,8 @@ typedef enum { SIMU_ROLE_SERVER = 1, SIMU_ROLE_CLIENT } simuRole;
 #define RFSIMU_OFFSET "offset"
 #define RFSIMU_PROP_DELAY "prop_delay"
 #define RFSIMU_WAIT_TIMEOUT "wait_timeout"
+#define RFSIMU_CHMOD_FILE "chmod_file"
+#define RFSIMU_CHMOD_POLL_MS "chmod_poll_ms"
 #define RFSIMU_ENABLE_BEAMS "enable_beams"
 #define RFSIMU_NUM_CONCURRENT_BEAMS "num_concurrent_beams"
 #define RFSIMU_BEAM_MAP "beam_map"
@@ -119,6 +123,8 @@ typedef enum { SIMU_ROLE_SERVER = 1, SIMU_ROLE_CLIENT } simuRole;
   UINT64PARAM(RFSIMU_OFFSET,            "<channel offset in samps>\n",              simOpt, NULL,                             0L),                    \
   DOUBLEPARAM(RFSIMU_PROP_DELAY,        "<propagation delay in ms>\n",              simOpt, NULL,                             0.0),                   \
   INTPARAM(RFSIMU_WAIT_TIMEOUT,         "<wait timeout if no UE connected>\n",      simOpt, NULL,                             1),                     \
+  STRINGPARAM(RFSIMU_CHMOD_FILE,        "<path to current channel-modification file>\n", simOpt, NULL,                        ""),                    \
+  INTPARAM(RFSIMU_CHMOD_POLL_MS,        "<channel-modification file poll interval in ms>\n", simOpt, NULL,                    200),                   \
   BOOLPARAM(RFSIMU_ENABLE_BEAMS,        "<enable simplified beam simulation>\n",    simBool,NULL,                             0),                     \
   INTPARAM(RFSIMU_NUM_CONCURRENT_BEAMS, "<number of concurrent beams supported>\n", simOpt, NULL,                             1),                     \
   UINT64PARAM(RFSIMU_BEAM_MAP,          "<initial beam map>\n",                     simOpt, NULL,                             1),                     \
@@ -217,6 +223,10 @@ typedef struct {
   void *telnetcmd_qid;
   poll_telnetcmdq_func_t poll_telnetcmdq;
   int wait_timeout;
+  char *chmod_file;
+  int chmod_poll_ms;
+  openair0_timestamp_t chmod_next_poll_ts;
+  bool chmod_channelmod_warning_logged;
   double prop_delay_ms;
   rfsim_beam_ctrl_t *beam_ctrl;
 } rfsimulator_state_t;
@@ -562,6 +572,10 @@ static void rfsimulator_readconfig(rfsimulator_state_t *rfsimulator)
   rfsimulator->chan_offset = *(gpd(rfsimuParam, sizeofArray(rfsimuParams), RFSIMU_OFFSET)->u64ptr);
   rfsimulator->prop_delay_ms = *(gpd(rfsimuParam, sizeofArray(rfsimuParams), RFSIMU_PROP_DELAY)->dblptr);
   rfsimulator->wait_timeout = *(gpd(rfsimuParam, sizeofArray(rfsimuParams), RFSIMU_WAIT_TIMEOUT)->iptr);
+  rfsimulator->chmod_file = strdup(*(gpd(rfsimuParam, sizeofArray(rfsimuParams), RFSIMU_CHMOD_FILE)->strptr));
+  rfsimulator->chmod_poll_ms = *(gpd(rfsimuParam, sizeofArray(rfsimuParams), RFSIMU_CHMOD_POLL_MS)->iptr);
+  if (rfsimulator->chmod_poll_ms <= 0)
+    rfsimulator->chmod_poll_ms = 200;
 
   rfsim_beam_ctrl_t *beam_ctrl = rfsimulator->beam_ctrl;
   beam_ctrl->enable_beams = *(gpd(rfsimuParam, sizeofArray(rfsimuParams), RFSIMU_ENABLE_BEAMS)->iptr);
@@ -617,6 +631,9 @@ static void rfsimulator_readconfig(rfsimulator_state_t *rfsimulator)
     beam_ctrl->rx.beams = beam_ids;
     beam_ctrl->tx.beams = beam_ids;
   }
+
+  if (rfsimulator->chmod_file != NULL && rfsimulator->chmod_file[0] != '\0')
+    LOG_I(HW, "Will poll RFsim channel modification file %s every %d ms\n", rfsimulator->chmod_file, rfsimulator->chmod_poll_ms);
 
   if (strncasecmp(rfsimulator->ip, "enb", 3) == 0 || strncasecmp(rfsimulator->ip, "server", 3) == 0)
     rfsimulator->role = SIMU_ROLE_SERVER;
@@ -793,6 +810,91 @@ static rfsimu_pathloss_status_t rfsimu_set_pathloss(rfsimulator_state_t *t,
   }
 
   return updated > 0 ? RFSIMU_PATHLOSS_OK : RFSIMU_PATHLOSS_NOT_FOUND;
+}
+
+static std::string rfsimu_trim(const std::string &input)
+{
+  size_t start = 0;
+  while (start < input.size() && isspace((unsigned char)input[start]))
+    start++;
+  size_t end = input.size();
+  while (end > start && isspace((unsigned char)input[end - 1]))
+    end--;
+  return input.substr(start, end - start);
+}
+
+static bool rfsimu_parse_chmod_line(const std::string &line, std::string *model_name, double *pathloss_dB)
+{
+  const size_t comment = line.find('#');
+  const std::string payload = rfsimu_trim(line.substr(0, comment));
+  if (payload.empty())
+    return false;
+
+  std::istringstream stream(payload);
+  std::string extra;
+  return (stream >> *model_name >> *pathloss_dB) && !(stream >> extra);
+}
+
+static void rfsimu_poll_chmod_file(rfsimulator_state_t *t)
+{
+  if (t == NULL || t->chmod_file == NULL || t->chmod_file[0] == '\0')
+    return;
+
+  const openair0_timestamp_t now = t->nextRxTstamp;
+  if (now < t->chmod_next_poll_ts)
+    return;
+
+  const openair0_timestamp_t poll_samples =
+      std::max<openair0_timestamp_t>(1, (openair0_timestamp_t)((t->sample_rate * t->chmod_poll_ms) / 1000.0));
+  t->chmod_next_poll_ts = now + poll_samples;
+
+  if (t->channelmod == false) {
+    if (!t->chmod_channelmod_warning_logged) {
+      LOG_W(HW, "Ignoring RFsim channel modification file %s because channel modelisation is disabled\n", t->chmod_file);
+      t->chmod_channelmod_warning_logged = true;
+    }
+    return;
+  }
+
+  std::ifstream input(t->chmod_file);
+  if (!input.good()) {
+    LOG_D(HW, "RFsim channel modification file %s is not readable yet\n", t->chmod_file);
+    return;
+  }
+
+  std::string line;
+  int line_no = 0;
+  while (std::getline(input, line)) {
+    line_no++;
+    std::string model_name;
+    double pathloss_dB = 0.0;
+    if (!rfsimu_parse_chmod_line(line, &model_name, &pathloss_dB)) {
+      if (!rfsimu_trim(line.substr(0, line.find('#'))).empty())
+        LOG_W(HW, "Ignoring invalid RFsim channel modification line %d in %s: %s\n", line_no, t->chmod_file, line.c_str());
+      continue;
+    }
+
+    std::vector<rfsimu_pathloss_update_t> updates;
+    const rfsimu_pathloss_status_t status = rfsimu_set_pathloss(t, model_name.c_str(), pathloss_dB, &updates);
+    if (status == RFSIMU_PATHLOSS_NOT_FOUND) {
+      LOG_D(HW, "RFsim channel modification target %s is not connected yet\n", model_name.c_str());
+      continue;
+    }
+    if (status != RFSIMU_PATHLOSS_OK) {
+      LOG_W(HW, "Failed to apply RFsim channel modification line %d in %s\n", line_no, t->chmod_file);
+      continue;
+    }
+
+    for (const rfsimu_pathloss_update_t &update : updates) {
+      if (update.old_pathloss_dB != update.new_pathloss_dB)
+        LOG_I(HW,
+              "path_loss_dB: %.1f -> %.1f for channel '%s' (from %s)\n",
+              update.old_pathloss_dB,
+              update.new_pathloss_dB,
+              update.model_name,
+              t->chmod_file);
+    }
+  }
 }
 
 static int rfsimu_setpathloss_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg)
@@ -1537,6 +1639,8 @@ static int rfsimulator_read_beams(openair0_device_t *device,
       if (((t->nextRxTstamp / nsamps) % 100) == 0)
         LOG_D(HW, "No UE, Generating void samples for Rx: %ld\n", t->nextRxTstamp);
 
+      rfsimu_poll_chmod_file(t);
+
       *ptimestamp = t->nextRxTstamp - nsamps;
       return nsamps;
     }
@@ -1566,6 +1670,8 @@ static int rfsimulator_read_beams(openair0_device_t *device,
   struct timespec start_time;
   int ret = clock_gettime(CLOCK_REALTIME, &start_time);
   AssertFatal(ret == 0, "clock_gettime() failed: errno %d, %s\n", errno, strerror(errno));
+
+  rfsimu_poll_chmod_file(t);
 
   for (int sock = 0; sock < MAX_FD_RFSIMU; sock++) {
     buffer_t *ptr = &t->buf[sock];
@@ -1672,6 +1778,7 @@ static void rfsimulator_end(openair0_device_t *device)
   clear_beam_queue(&s->beam_ctrl->rx, INT64_MAX);
   delete s->beam_ctrl;
   close(s->epollfd);
+  free(s->chmod_file);
   free(s);
 }
 
