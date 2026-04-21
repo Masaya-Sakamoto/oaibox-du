@@ -311,6 +311,8 @@ void mac_top_init_gNB(ngran_node_t node_type,
       RC.nrmac[i]->common_channels[0].ServingCellConfigCommon = scc;
       RC.nrmac[i]->radio_config = *config;
       RC.nrmac[i]->rlc_config = *default_rlc_config;
+      RC.nrmac[i]->antenna_ctrl = create_default_antenna_ctrl();
+      AssertFatal(RC.nrmac[i]->antenna_ctrl != NULL, "could not initialize antenna control interface\n");
 
       RC.nrmac[i]->first_MIB = true;
       RC.nrmac[i]->num_scheduled_prach_rx = 0;
@@ -377,6 +379,8 @@ void mac_top_destroy_gNB(gNB_MAC_INST *mac)
   if (mac->f1_config.setup_resp)
     free_f1ap_setup_response(mac->f1_config.setup_resp);
   free(mac->f1_config.setup_resp);
+  destroy_antenna_ctrl(mac->antenna_ctrl);
+  mac->antenna_ctrl = NULL;
 }
 
 void nr_mac_send_f1_setup_req(void)

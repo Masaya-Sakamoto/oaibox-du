@@ -464,7 +464,7 @@ NR_beam_alloc_t beam_allocation_procedure(NR_beam_info_t *beam_info,
                                           int16_t beam_index,
                                           int slots_per_frame);
 void reset_beam_status(NR_beam_info_t *beam_info, int frame, int slot, int16_t beam_alloc, int slots_per_frame, uint16_t new_beam);
-void beam_selection_procedures(gNB_MAC_INST *mac, NR_UE_info_t *UE);
+void beam_selection_procedures(gNB_MAC_INST *mac, NR_UE_info_t *UE, frame_t frame, slot_t slot);
 void nr_sr_reporting(gNB_MAC_INST *nrmac, frame_t frameP, slot_t slotP);
 bwp_info_t get_pdsch_bwp_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE);
 bwp_info_t get_pusch_bwp_start_size(NR_UE_info_t *UE);

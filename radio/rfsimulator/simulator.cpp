@@ -128,6 +128,7 @@ typedef enum { SIMU_ROLE_SERVER = 1, SIMU_ROLE_CLIENT } simuRole;
 // clang-format on
 static void getset_currentchannels_type(char *buf, int debug, webdatadef_t *tdata, telnet_printfunc_t prnt);
 static int rfsimu_setchanmod_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg);
+static int rfsimu_setpathloss_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg);
 static int rfsimu_setdistance_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg);
 static int rfsimu_getdistance_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg);
 static int rfsimu_vtime_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg);
@@ -139,6 +140,7 @@ static telnetshell_cmddef_t rfsimu_cmdarray[] = {
     {"setmodel", "<model name> <model type>", (cmdfunc_t)rfsimu_setchanmod_cmd, {NULL}, TELNETSRV_CMDFLAG_PUSHINTPOOLQ | TELNETSRV_CMDFLAG_TELNETONLY, NULL},
     {"setdistance", "<model name> <distance>", (cmdfunc_t)rfsimu_setdistance_cmd, {NULL}, TELNETSRV_CMDFLAG_PUSHINTPOOLQ | TELNETSRV_CMDFLAG_NEEDPARAM },
     {"getdistance", "<model name>", (cmdfunc_t)rfsimu_getdistance_cmd, {NULL}, TELNETSRV_CMDFLAG_PUSHINTPOOLQ},
+    {"setpathloss", "<model name> <path_loss_dB>", (cmdfunc_t)rfsimu_setpathloss_cmd, {NULL}, TELNETSRV_CMDFLAG_PUSHINTPOOLQ | TELNETSRV_CMDFLAG_NEEDPARAM},
     {"vtime", "", (cmdfunc_t)rfsimu_vtime_cmd, {NULL}, TELNETSRV_CMDFLAG_PUSHINTPOOLQ | TELNETSRV_CMDFLAG_AUTOUPDATE},
     {"setbeam", "beam_map", (cmdfunc_t)rfsimu_set_beam, {NULL}, TELNETSRV_CMDFLAG_PUSHINTPOOLQ},
     {"setbeamids", "beam_id1,beam_id2,...", (cmdfunc_t)rfsimu_set_beamids, {NULL}, TELNETSRV_CMDFLAG_PUSHINTPOOLQ},
@@ -734,6 +736,53 @@ static void getset_currentchannels_type(char *buf, int debug, webdatadef_t *tdat
   } else {
     get_currentchannels_type("modify type", debug, tdata, prnt);
   }
+}
+
+static int rfsimu_setpathloss_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg)
+{
+  if (debug)
+    prnt("%s() buffer \"%s\"\n", __func__, (buff != NULL) ? buff : "NULL");
+
+  char *modelname = NULL;
+  double pathloss_dB = 0.0;
+  int s = buff != NULL ? sscanf(buff, "%m[^ ] %lf\n", &modelname, &pathloss_dB) : 0;
+  if (s != 2) {
+    prnt("%s: usage: setpathloss <model name> <path_loss_dB>\n", __func__);
+    prnt("  example: setpathloss rfsimu_channel_ue0 -20.0\n");
+    free(modelname);
+    return CMDSTATUS_VARNOTFOUND;
+  }
+
+  rfsimulator_state_t *t = (rfsimulator_state_t *)arg;
+  int found = 0;
+  for (int i = 0; i < MAX_FD_RFSIMU; i++) {
+    buffer_t *b = &t->buf[i];
+    if (b->conn_sock <= 0 || b->channel_model == NULL || b->channel_model->model_name == NULL)
+      continue;
+    if (strcmp(b->channel_model->model_name, modelname) != 0)
+      continue;
+
+    channel_desc_t *cd = b->channel_model;
+    const double old_pathloss_dB = cd->path_loss_dB;
+    cd->path_loss_dB = pathloss_dB;
+    prnt("path_loss_dB: %.1f -> %.1f for channel '%s'\n", old_pathloss_dB, pathloss_dB, modelname);
+    found++;
+  }
+
+  if (found == 0) {
+    prnt("Channel '%s' not found. Active channels:\n", modelname);
+    for (int i = 0; i < MAX_FD_RFSIMU; i++) {
+      buffer_t *b = &t->buf[i];
+      if (b->conn_sock <= 0 || b->channel_model == NULL || b->channel_model->model_name == NULL)
+        continue;
+      prnt("  - %s (path_loss_dB=%.1f)\n", b->channel_model->model_name, b->channel_model->path_loss_dB);
+    }
+    free(modelname);
+    return CMDSTATUS_VARNOTFOUND;
+  }
+
+  free(modelname);
+  return CMDSTATUS_FOUND;
 }
 
 static int rfsimu_setdistance_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg)

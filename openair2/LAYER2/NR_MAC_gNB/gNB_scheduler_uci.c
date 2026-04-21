@@ -802,7 +802,7 @@ static void extract_pucch_csi_report(NR_CSI_MeasConfig_t *csi_MeasConfig,
             break;
           case NR_CSI_ReportConfig__reportQuantity_PR_ssb_Index_RSRP:
             evaluate_rsrp_report(nrmac, UE, sched_ctrl, csi_report_id, payload, &cumul_bits, reportQuantity_type);
-            beam_selection_procedures(nrmac, UE);
+            beam_selection_procedures(nrmac, UE, frame, slot);
             break;
           case NR_CSI_ReportConfig__reportQuantity_PR_cri_RI_CQI:
             sched_ctrl->CSI_report.cri_ri_li_pmi_cqi_report.print_report = true;

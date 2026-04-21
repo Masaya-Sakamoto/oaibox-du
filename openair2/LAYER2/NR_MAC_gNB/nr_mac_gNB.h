@@ -88,6 +88,7 @@
 
 /* MAC */
 #include "LAYER2/NR_MAC_COMMON/nr_mac_common.h"
+#include "LAYER2/NR_MAC_gNB/beam_antenna_control.h"
 #include "LAYER2/NR_MAC_gNB/mac_config.h"
 #include "NR_TAG.h"
 
@@ -973,6 +974,7 @@ typedef struct gNB_MAC_INST_s {
   time_stats_t rx_ulsch_sdu;  // include rlc_data_ind
 
   NR_beam_info_t beam_info;
+  antenna_control_if_t *antenna_ctrl;
 
   /// maximum number of slots before a UE will be scheduled ULSCH automatically
   uint32_t ulsch_max_frame_inactivity;

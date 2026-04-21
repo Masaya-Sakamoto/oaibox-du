@@ -3608,10 +3608,25 @@ void nr_mac_release_ue(gNB_MAC_INST *mac, int rnti)
   mac_remove_nr_ue(mac, rnti);
 }
 
-static void beam_switching_procedure(NR_UE_info_t *UE, int new_beam_index)
+static void beam_switching_procedure(gNB_MAC_INST *mac, NR_UE_info_t *UE, int new_beam_index, frame_t frame, slot_t slot)
 {
-  LOG_I(NR_MAC, "[UE %x] Switching to beam with ID %d (from %d)\n", UE->rnti, new_beam_index, UE->UE_beam_index);
+  const int old_beam = UE->UE_beam_index;
+  if (old_beam == new_beam_index)
+    return;
+
+  LOG_I(NR_MAC, "[UE %x] Switching to beam with ID %d (from %d)\n", UE->rnti, new_beam_index, old_beam);
   UE->UE_beam_index = new_beam_index;
+
+  if (mac->antenna_ctrl != NULL && mac->antenna_ctrl->on_beam_switch != NULL) {
+    const beam_switch_event_t event = {
+        .rnti = UE->rnti,
+        .old_beam_index = (int16_t)old_beam,
+        .new_beam_index = (int16_t)new_beam_index,
+        .frame = frame,
+        .slot = slot,
+    };
+    mac->antenna_ctrl->on_beam_switch(&event);
+  }
 }
 
 void nr_mac_update_timers(module_id_t module_id, frame_t frame, slot_t slot)
@@ -3670,7 +3685,7 @@ void nr_mac_update_timers(module_id_t module_id, frame_t frame, slot_t slot)
     }
     if (nr_timer_tick(&sched_ctrl->tci_beam_switch)) {
       nr_timer_stop(&sched_ctrl->tci_beam_switch);
-      beam_switching_procedure(UE, sched_ctrl->UE_mac_ce_ctrl.tci_state_ind.tciStateId);
+      beam_switching_procedure(mac, UE, sched_ctrl->UE_mac_ce_ctrl.tci_state_ind.tciStateId, frame, slot);
     }
   }
 }
@@ -3816,7 +3831,7 @@ void reset_beam_status(NR_beam_info_t *beam_info, int frame, int slot, int16_t b
   }
 }
 
-void beam_selection_procedures(gNB_MAC_INST *mac, NR_UE_info_t *UE)
+void beam_selection_procedures(gNB_MAC_INST *mac, NR_UE_info_t *UE, frame_t frame, slot_t slot)
 {
   // do not perform beam procedures if there is no beam information
   if (mac->beam_info.beam_mode == NO_BEAM_MODE)
@@ -3828,7 +3843,7 @@ void beam_selection_procedures(gNB_MAC_INST *mac, NR_UE_info_t *UE)
   int new_bf_index = get_beam_from_ssbidx(mac, rsrp_report->resource_id[0]);
   if (!mac->radio_config.do_TCI) { // if not TCI is configure we switch beam directly
     if (UE->UE_beam_index != new_bf_index)
-      beam_switching_procedure(UE, new_bf_index);
+      beam_switching_procedure(mac, UE, new_bf_index, frame, slot);
     return;
   }
 
