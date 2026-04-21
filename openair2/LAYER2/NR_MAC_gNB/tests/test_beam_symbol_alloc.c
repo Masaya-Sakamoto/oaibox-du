@@ -309,6 +309,99 @@ static void test_no_beam_mode(void)
   TEST_END();
 }
 
+/* ========================================================================= */
+/*  FR2 64-Beam Test Cases (band257, 120kHz SCS, 80 slots/frame)             */
+/* ========================================================================= */
+
+#define FR2_SLOTS_PER_FRAME 80
+
+static void test_fr2_64beam_sequential_slots(void)
+{
+  TEST_START("TC-8: fr2_64beam_sequential_slot_allocation");
+  NR_beam_info_t bi;
+  init_beam_info(&bi, -7, 1, FR2_SLOTS_PER_FRAME);
+
+  /* Allocate 64 different beams, each in a unique slot within frame 0.
+   * With 80 slots available, all 64 should succeed without conflict. */
+  for (int beam = 0; beam < 64; beam++) {
+    int slot = beam % FR2_SLOTS_PER_FRAME;
+    NR_beam_alloc_t res = beam_allocation_procedure(&bi, 0, slot, 0, 7, beam, FR2_SLOTS_PER_FRAME);
+    ASSERT_GE(res.idx, 0);
+  }
+
+  free_beam_info(&bi);
+  TEST_END();
+}
+
+static void test_fr2_table_sizing(void)
+{
+  TEST_START("TC-9: fr2_beam_table_size_160_entries");
+  NR_beam_info_t bi;
+  init_beam_info(&bi, -7, 1, FR2_SLOTS_PER_FRAME);
+
+  /* 80 slots/frame × 2 frames / beam_slot_duration(1) = 160 */
+  ASSERT_EQ(bi.beam_allocation_size[0], 160);
+  /* 14 symbols / 7 = 2 symbol groups */
+  ASSERT_EQ(bi.beam_allocation_size[1], 2);
+
+  free_beam_info(&bi);
+  TEST_END();
+}
+
+static void test_fr2_64beam_round_robin(void)
+{
+  TEST_START("TC-10: fr2_64beam_round_robin_two_frames");
+  NR_beam_info_t bi;
+  init_beam_info(&bi, -7, 1, FR2_SLOTS_PER_FRAME);
+
+  /* Simulate SSB-like round-robin: beam i in slot i (mod 80).
+   * Allocate across frames 0 and 1 to fill the entire table. */
+  int alloc_count = 0;
+  for (int frame = 0; frame < 2; frame++) {
+    for (int slot = 0; slot < FR2_SLOTS_PER_FRAME; slot++) {
+      int beam = (frame * FR2_SLOTS_PER_FRAME + slot) % 64;
+      /* Symbol group 0 (symbols 0-6) */
+      NR_beam_alloc_t res = beam_allocation_procedure(&bi, frame, slot, 0, 7, beam, FR2_SLOTS_PER_FRAME);
+      ASSERT_GE(res.idx, 0);
+      alloc_count++;
+    }
+  }
+  ASSERT_EQ(alloc_count, 160);
+
+  free_beam_info(&bi);
+  TEST_END();
+}
+
+static void test_fr2_64beam_reset_all(void)
+{
+  TEST_START("TC-11: fr2_64beam_full_reset");
+  NR_beam_info_t bi;
+  init_beam_info(&bi, -7, 1, FR2_SLOTS_PER_FRAME);
+
+  /* Allocate 64 beams */
+  uint16_t bitmaps[64];
+  for (int beam = 0; beam < 64; beam++) {
+    NR_beam_alloc_t res = beam_allocation_procedure(&bi, 0, beam, 0, 7, beam, FR2_SLOTS_PER_FRAME);
+    ASSERT_GE(res.idx, 0);
+    bitmaps[beam] = res.new_beam;
+  }
+
+  /* Reset all 64 beams */
+  for (int beam = 0; beam < 64; beam++) {
+    reset_beam_status(&bi, 0, beam, beam, FR2_SLOTS_PER_FRAME, bitmaps[beam]);
+  }
+
+  /* Re-allocate should succeed (table is clear) */
+  for (int beam = 0; beam < 64; beam++) {
+    NR_beam_alloc_t res = beam_allocation_procedure(&bi, 0, beam, 0, 7, beam + 100, FR2_SLOTS_PER_FRAME);
+    ASSERT_GE(res.idx, 0);
+    ASSERT_TRUE(res.new_beam != 0);
+  }
+
+  free_beam_info(&bi);
+  TEST_END();
+}
+
 int main(void)
 {
   printf("=== Symbol-Level Beam Allocation Unit Tests ===\n\n");
@@ -320,6 +413,12 @@ int main(void)
   test_reset_symbol_bitmap();
   test_dci_pdsch_separate_beams();
   test_no_beam_mode();
+
+  /* FR2 64-beam tests */
+  test_fr2_64beam_sequential_slots();
+  test_fr2_table_sizing();
+  test_fr2_64beam_round_robin();
+  test_fr2_64beam_reset_all();
 
   printf("\n=== Results: %d/%d passed", tests_passed, tests_run);
   if (tests_failed > 0)
