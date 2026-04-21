@@ -27,7 +27,7 @@ set -euo pipefail
 
 # ---- Defaults ----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 GNB_BINARY="${REPO_ROOT}/cmake_targets/ran_build/build/nr-softmodem"
 UE_BINARY="${REPO_ROOT}/cmake_targets/ran_build/build/nr-uesoftmodem"
 CONF_DIR="${REPO_ROOT}/ci-scripts/conf_files"
