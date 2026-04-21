@@ -118,7 +118,6 @@ start_gnb() {
     --sa \
     --rfsim \
     --telnetsrv \
-    --telnetsrv.listenstdin \
     --telnetsrv.shrmod rfsim \
     > "${GNB_LOG}" 2>&1 &
   GNB_PID=$!
@@ -135,7 +134,6 @@ start_ue() {
     --band 257 \
     -C 27900000000 \
     --ssb 576 \
-    --do-ra \
     --sa \
     > "${UE_LOG}" 2>&1 &
   UE_PID=$!
@@ -161,6 +159,7 @@ wait_for_ra() {
     fi
     if ! kill -0 "${GNB_PID}" 2>/dev/null; then
       error "gNB process died"
+      tail -100 "${GNB_LOG}"
       return 1
     fi
     sleep 1
@@ -219,11 +218,12 @@ check_beam_switch() {
   info "Checking gNB log for beam switching events..."
 
   local switch_count=0
-  switch_count=$(grep -c "Switching to beam\|Beam switch\|AntennaCtrl.*beam.*->" "${GNB_LOG}" 2>/dev/null || echo 0)
+  switch_count=$(grep -Ec "Switching to beam|Beam switch|AntennaCtrl.*beam.*->" "${GNB_LOG}" 2>/dev/null || true)
+  switch_count=${switch_count:-0}
 
   if [[ ${switch_count} -gt 0 ]]; then
     info "Found ${switch_count} beam switching event(s)"
-    grep "Switching to beam\|Beam switch\|AntennaCtrl.*beam.*->" "${GNB_LOG}" | tail -10
+    grep -E "Switching to beam|Beam switch|AntennaCtrl.*beam.*->" "${GNB_LOG}" | tail -10
     return 0
   else
     warn "No beam switching events detected"
@@ -234,11 +234,12 @@ check_beam_switch() {
 # ---- Check for fatal errors ----
 check_no_fatal_errors() {
   local fatal_count=0
-  fatal_count=$(grep -c "Segmentation fault\|FATAL\|Aborted\|AssertFatal" "${GNB_LOG}" 2>/dev/null || echo 0)
+  fatal_count=$(grep -Ec "Segmentation fault|FATAL|Aborted|AssertFatal" "${GNB_LOG}" 2>/dev/null || true)
+  fatal_count=${fatal_count:-0}
 
   if [[ ${fatal_count} -gt 0 ]]; then
     error "Fatal errors detected in gNB log:"
-    grep "Segmentation fault\|FATAL\|Aborted\|AssertFatal" "${GNB_LOG}" | tail -5
+    grep -E "Segmentation fault|FATAL|Aborted|AssertFatal" "${GNB_LOG}" | tail -5
     return 1
   fi
   return 0
@@ -253,7 +254,7 @@ check_64beam_config() {
     return 0
   fi
   # Even if not explicitly logged, check that beam scheduling is active
-  if grep -q "beam_mode.*PRECONFIGURED\|set_analog_beamforming.*2\|beam_duration.*-7" "${GNB_LOG}" 2>/dev/null; then
+  if grep -q "beam_mode.*PRECONFIGURED\|set_analog_beamforming.*1\|beam_duration.*-7" "${GNB_LOG}" 2>/dev/null; then
     info "Symbol-level beam scheduling is active"
     return 0
   fi
@@ -278,6 +279,7 @@ main() {
 
   local test_result="PASS"
   local failures=0
+  local ra_ok=1
 
   # Step 1: Start gNB
   start_gnb
@@ -292,23 +294,28 @@ main() {
     error "FAILED: RA did not complete"
     test_result="FAIL"
     failures=$((failures + 1))
+    ra_ok=0
   fi
 
   # Step 4: Check 64-beam configuration
   check_64beam_config
 
-  # Step 5: Inject channel variation
-  inject_channel_variation
+  if [[ ${ra_ok} -eq 1 ]]; then
+    # Step 5: Inject channel variation
+    inject_channel_variation
 
-  # Step 6: Check for beam switching
-  if ! check_beam_switch; then
-    warn "Beam switching not detected — trying distance-based fallback..."
-    inject_channel_variation_distance
+    # Step 6: Check for beam switching
     if ! check_beam_switch; then
-      error "FAILED: No beam switching events detected"
-      test_result="FAIL"
-      failures=$((failures + 1))
+      warn "Beam switching not detected — trying distance-based fallback..."
+      inject_channel_variation_distance
+      if ! check_beam_switch; then
+        error "FAILED: No beam switching events detected"
+        test_result="FAIL"
+        failures=$((failures + 1))
+      fi
     fi
+  else
+    warn "Skipping channel variation and beam-switch checks because RA did not complete"
   fi
 
   # Step 7: Check no fatal errors

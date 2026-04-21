@@ -738,6 +738,63 @@ static void getset_currentchannels_type(char *buf, int debug, webdatadef_t *tdat
   }
 }
 
+typedef enum {
+  RFSIMU_PATHLOSS_OK = 0,
+  RFSIMU_PATHLOSS_BAD_ARGUMENT,
+  RFSIMU_PATHLOSS_CHANNELMOD_DISABLED,
+  RFSIMU_PATHLOSS_NOT_FOUND,
+} rfsimu_pathloss_status_t;
+
+typedef struct {
+  const char *model_name;
+  double old_pathloss_dB;
+  double new_pathloss_dB;
+} rfsimu_pathloss_update_t;
+
+static bool rfsimu_is_active_channel(const buffer_t *b)
+{
+  return b != NULL && b->conn_sock >= 0 && b->channel_model != NULL && b->channel_model->model_name != NULL;
+}
+
+static double rfsimu_set_channel_pathloss(channel_desc_t *channel_model, double pathloss_dB)
+{
+  const double old_pathloss_dB = channel_model->path_loss_dB;
+  channel_model->path_loss_dB = pathloss_dB;
+  return old_pathloss_dB;
+}
+
+static rfsimu_pathloss_status_t rfsimu_set_pathloss(rfsimulator_state_t *t,
+                                                    const char *model_name,
+                                                    double pathloss_dB,
+                                                    std::vector<rfsimu_pathloss_update_t> *updates)
+{
+  if (updates != NULL)
+    updates->clear();
+
+  if (t == NULL || model_name == NULL || model_name[0] == '\0')
+    return RFSIMU_PATHLOSS_BAD_ARGUMENT;
+
+  if (t->channelmod == false)
+    return RFSIMU_PATHLOSS_CHANNELMOD_DISABLED;
+
+  int updated = 0;
+  for (int i = 0; i < MAX_FD_RFSIMU; i++) {
+    buffer_t *b = &t->buf[i];
+    if (!rfsimu_is_active_channel(b))
+      continue;
+    channel_desc_t *cd = b->channel_model;
+    if (strcmp(cd->model_name, model_name) != 0)
+      continue;
+
+    const double old_pathloss_dB = rfsimu_set_channel_pathloss(cd, pathloss_dB);
+    if (updates != NULL)
+      updates->push_back({cd->model_name, old_pathloss_dB, pathloss_dB});
+    updated++;
+  }
+
+  return updated > 0 ? RFSIMU_PATHLOSS_OK : RFSIMU_PATHLOSS_NOT_FOUND;
+}
+
 static int rfsimu_setpathloss_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg)
 {
   if (debug)
@@ -754,26 +811,27 @@ static int rfsimu_setpathloss_cmd(char *buff, int debug, telnet_printfunc_t prnt
   }
 
   rfsimulator_state_t *t = (rfsimulator_state_t *)arg;
-  int found = 0;
-  for (int i = 0; i < MAX_FD_RFSIMU; i++) {
-    buffer_t *b = &t->buf[i];
-    if (b->conn_sock <= 0 || b->channel_model == NULL || b->channel_model->model_name == NULL)
-      continue;
-    if (strcmp(b->channel_model->model_name, modelname) != 0)
-      continue;
-
-    channel_desc_t *cd = b->channel_model;
-    const double old_pathloss_dB = cd->path_loss_dB;
-    cd->path_loss_dB = pathloss_dB;
-    prnt("path_loss_dB: %.1f -> %.1f for channel '%s'\n", old_pathloss_dB, pathloss_dB, modelname);
-    found++;
-  }
-
-  if (found == 0) {
+  std::vector<rfsimu_pathloss_update_t> updates;
+  const rfsimu_pathloss_status_t status = rfsimu_set_pathloss(t, modelname, pathloss_dB, &updates);
+  if (status == RFSIMU_PATHLOSS_OK) {
+    for (const rfsimu_pathloss_update_t &update : updates)
+      prnt("path_loss_dB: %.1f -> %.1f for channel '%s'\n",
+           update.old_pathloss_dB,
+           update.new_pathloss_dB,
+           update.model_name);
+  } else if (status == RFSIMU_PATHLOSS_BAD_ARGUMENT) {
+    prnt("%s: usage: setpathloss <model name> <path_loss_dB>\n", __func__);
+    free(modelname);
+    return CMDSTATUS_VARNOTFOUND;
+  } else if (status == RFSIMU_PATHLOSS_CHANNELMOD_DISABLED) {
+    prnt("%s: ERROR channel modelisation disabled...\n", __func__);
+    free(modelname);
+    return CMDSTATUS_VARNOTFOUND;
+  } else {
     prnt("Channel '%s' not found. Active channels:\n", modelname);
     for (int i = 0; i < MAX_FD_RFSIMU; i++) {
       buffer_t *b = &t->buf[i];
-      if (b->conn_sock <= 0 || b->channel_model == NULL || b->channel_model->model_name == NULL)
+      if (!rfsimu_is_active_channel(b))
         continue;
       prnt("  - %s (path_loss_dB=%.1f)\n", b->channel_model->model_name, b->channel_model->path_loss_dB);
     }
