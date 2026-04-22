@@ -107,9 +107,11 @@ int beam_index_allocation(bool das,
   //AssertFatal(IS_BIT_SET(fapi_beam_index, 15), "Can't handle preconfigured DBM yet\n");
   int ru_beam_idx = fapi_beam_index & 0x7fff;
   int idx = -1;
+  const int used_symbols = bitmap_symbols != 0 ? bitmap_symbols : (1 << symbols_per_slot) - 1;
   for (int j = 0; j < common_vars->num_beams_period; j++) {
-    // L2 analog beam implementation is slot based, so we need to verify occupancy for the whole slot
     for (int i = 0; i < symbols_per_slot; i++) {
+      if (((used_symbols >> i) & 0x01) == 0)
+        continue;
       int current_beam = common_vars->beam_id[j][slot * symbols_per_slot + i];
       if (current_beam == -1 || current_beam == ru_beam_idx)
         idx = j;
@@ -123,7 +125,7 @@ int beam_index_allocation(bool das,
   }
   AssertFatal(idx >= 0, "Couldn't allocate beam ID %d\n", ru_beam_idx);
   for (int j = 0; j < symbols_per_slot; j++) {
-    if (((bitmap_symbols >> j) & 0x01))
+    if (((used_symbols >> j) & 0x01))
       common_vars->beam_id[idx][slot * symbols_per_slot + j] = ru_beam_idx;
   }
   LOG_D(PHY, "Allocating beam_id[%d] %d in slot %d\n", idx, ru_beam_idx, slot);

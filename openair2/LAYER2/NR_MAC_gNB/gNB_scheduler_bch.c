@@ -329,7 +329,7 @@ static NR_sched_pdsch_t allocate_sib1(gNB_MAC_INST *gNB_mac,
   NR_ServingCellConfigCommon_t *scc = cc->ServingCellConfigCommon;
   NR_pdsch_dmrs_t dmrs_parms = get_dl_dmrs_params(scc, NULL, tda_info, 1);
   NR_sched_pdsch_t pdsch = {
-      .bwp_info = get_pdsch_bwp_start_size(gNB_mac, NULL),
+      .bwp_info = {.bwpStart = type0_PDCCH_CSS_config->cset_start_rb, .bwpSize = type0_PDCCH_CSS_config->num_rbs},
       .time_domain_allocation = time_domain_allocation,
       .dmrs_parms = dmrs_parms,
       .tda_info = *tda_info,
@@ -344,7 +344,7 @@ static NR_sched_pdsch_t allocate_sib1(gNB_MAC_INST *gNB_mac,
     // Mark the corresponding RBs as used
     fill_pdcch_vrb_map(gNB_mac, CC_id, pdcch, cce_index, aggregation_level, beam);
     for (int rb = 0; rb < pdsch.rbSize; rb++)
-      vrb_map[rb + type0_PDCCH_CSS_config->cset_start_rb] |= SL_to_bitmap(tda_info->startSymbolIndex, tda_info->nrOfSymbols);
+      vrb_map[pdsch.bwp_info.bwpStart + pdsch.rbStart + rb] |= SL_to_bitmap(tda_info->startSymbolIndex, tda_info->nrOfSymbols);
   } else {
     pdsch.tb_size = 0; // to signal we couldn't allocate TBS
     pdsch.time_domain_allocation = -1;
@@ -423,7 +423,7 @@ static void nr_fill_nfapi_dl_SIB_pdu(gNB_MAC_INST *gNB_mac,
                      search_space,
                      coreset,
                      0,
-                     gNB_mac->cset0_bwp_size);
+                     type0_PDCCH_CSS_config->num_rbs);
 
   LOG_D(MAC,
         "BWPSize: %3i, BWPStart: %3i, SubcarrierSpacing: %i, CyclicPrefix: %i, StartSymbolIndex: %i, DurationSymbols: %i, "
@@ -531,6 +531,9 @@ void schedule_nr_sib1(module_id_t module_idP,
       AssertFatal(false, "SSB bitmap size value %d undefined (allowed values 1,2,3)\n", scc->ssb_PositionsInBurst->present);
   }
 
+  int sib1_attempts = 0;
+  int sib1_scheduled = 0;
+
   for (int i = 0; i < L_max; i++) {
 
     NR_Type0_PDCCH_CSS_config_t *type0_PDCCH_CSS_config = &gNB_mac->type0_PDCCH_CSS_config[i];
@@ -539,6 +542,7 @@ void schedule_nr_sib1(module_id_t module_idP,
        (slotP == type0_PDCCH_CSS_config->slot) &&
        (type0_PDCCH_CSS_config->num_rbs > 0) &&
        (type0_PDCCH_CSS_config->active == true)) {
+      sib1_attempts++;
 
       AssertFatal(is_dl_slot(slotP, &gNB_mac->frame_structure),
                   "Trying to schedule SIB1 for SSB %d in slot %d which is not DL. Check searchSpaceZero configuration.\n",
@@ -590,7 +594,19 @@ void schedule_nr_sib1(module_id_t module_idP,
           }
         }
       }
-      AssertFatal(gNB_mac->sib1_pdsch[i].time_domain_allocation >= 0, "Couldn't select any TDA for SIB1\n");
+      if (gNB_mac->sib1_pdsch[i].time_domain_allocation < 0) {
+        LOG_W(NR_MAC,
+              "Skipping SIB1 for SSB %d in slot %d: no valid TDA (CORESET start=%d duration=%d mux_pattern=%u first_symbol=%u num_symbols=%d)\n",
+              type0_PDCCH_CSS_config->ssb_index,
+              slotP,
+              sched_pdcch.StartSymbolIndex,
+              sched_pdcch.DurationSymbols,
+              type0_PDCCH_CSS_config->type0_pdcch_ss_mux_pattern,
+              type0_PDCCH_CSS_config->first_symbol_index,
+              type0_PDCCH_CSS_config->num_symbols);
+        reset_beam_status(&gNB_mac->beam_info, frameP, slotP, beam_index, n_slots_frame, beam.new_beam);
+        continue;
+      }
       if (!res)
         res = check_sib1_tda(gNB_mac,
                              &sched_pdcch,
@@ -600,6 +616,20 @@ void schedule_nr_sib1(module_id_t module_idP,
                              gNB_mac->sib1_pdsch[i].time_domain_allocation,
                              i,
                              CC_id);
+      if (!res || gNB_mac->sib1_pdsch[i].tb_size <= 0) {
+        LOG_W(NR_MAC,
+              "Skipping SIB1 for SSB %d in slot %d: cached TDA %d is not allocatable (CORESET start=%d duration=%d mux_pattern=%u first_symbol=%u num_symbols=%d)\n",
+              type0_PDCCH_CSS_config->ssb_index,
+              slotP,
+              gNB_mac->sib1_pdsch[i].time_domain_allocation,
+              sched_pdcch.StartSymbolIndex,
+              sched_pdcch.DurationSymbols,
+              type0_PDCCH_CSS_config->type0_pdcch_ss_mux_pattern,
+              type0_PDCCH_CSS_config->first_symbol_index,
+              type0_PDCCH_CSS_config->num_symbols);
+        reset_beam_status(&gNB_mac->beam_info, frameP, slotP, beam_index, n_slots_frame, beam.new_beam);
+        continue;
+      }
       NR_beam_alloc_t beam_sib = beam_allocation_procedure(&gNB_mac->beam_info,
                                                            frameP,
                                                            slotP,
@@ -607,7 +637,19 @@ void schedule_nr_sib1(module_id_t module_idP,
                                                            gNB_mac->sib1_pdsch[i].tda_info.nrOfSymbols,
                                                            beam_index,
                                                            n_slots_frame);
-      AssertFatal(beam_sib.idx >= 0, "Cannot allocate SIB1 corresponding to SSB %d in any available beam\n", i);
+      if (beam_sib.idx < 0) {
+        LOG_W(NR_MAC,
+              "Skipping SIB1 for SSB %d in slot %d: no beam available for PDSCH symbols %d..%d (CORESET start=%d duration=%d mux_pattern=%u)\n",
+              type0_PDCCH_CSS_config->ssb_index,
+              slotP,
+              gNB_mac->sib1_pdsch[i].tda_info.startSymbolIndex,
+              gNB_mac->sib1_pdsch[i].tda_info.startSymbolIndex + gNB_mac->sib1_pdsch[i].tda_info.nrOfSymbols - 1,
+              sched_pdcch.StartSymbolIndex,
+              sched_pdcch.DurationSymbols,
+              type0_PDCCH_CSS_config->type0_pdcch_ss_mux_pattern);
+        reset_beam_status(&gNB_mac->beam_info, frameP, slotP, beam_index, n_slots_frame, beam.new_beam);
+        continue;
+      }
       int tb_size = gNB_mac->sib1_pdsch[i].tb_size;
       AssertFatal(res && tb_size > 0, "Couldn't allocate TB for SIB1 for an already allocated TDA\n");
       nfapi_nr_dl_tti_request_body_t *dl_req = &DL_req->dl_tti_request_body;
@@ -667,8 +709,13 @@ void schedule_nr_sib1(module_id_t module_idP,
         trace_pdu(&tmp);
       }
 
+      sib1_scheduled++;
     }
   }
+  AssertFatal(sib1_attempts == 0 || sib1_scheduled > 0,
+              "Couldn't schedule SIB1 for any active SSB in frame.slot %d.%d\n",
+              frameP,
+              slotP);
 }
 
 struct NR_SchedulingInfo2_r17 *find_sib19_sched_info(const struct NR_SI_SchedulingInfo_v1700 *si_schedulinginfo2_r17)

@@ -3,7 +3,7 @@
 # run_beam_switch_test.sh
 #
 # Integration test: FR2 64-beam SSB with symbol-level beam scheduling.
-# Validates that channel variation (via RFsim path_loss manipulation)
+# Validates that channel variation (via RFsim ChMod file injection)
 # triggers beam switching in the gNB MAC scheduler.
 #
 # Prerequisites:
@@ -14,7 +14,7 @@
 # Test scenario:
 #   1. Start gNB (server) with 64-beam symbol-level config
 #   2. Start UE (client) and wait for RA completion
-#   3. Inject channel variation via telnet (setpathloss or setdistance)
+#   3. Inject channel variation via RFsim ChMod pathloss file
 #   4. Check gNB logs for beam switching events
 #   5. Report PASS/FAIL
 #
@@ -33,8 +33,7 @@ UE_BINARY="${REPO_ROOT}/cmake_targets/ran_build/build/nr-uesoftmodem"
 CONF_DIR="${REPO_ROOT}/ci-scripts/conf_files"
 GNB_CONF="${CONF_DIR}/gnb.sa.band257.u3.66prb.rfsim.beam-symbol.conf"
 TIMEOUT=60
-TELNET_PORT=9090
-TELNET_TIMEOUT=2
+UE_FALLBACK_ARGS="-C 27975360000 -r 66 --numerology 3 --band 257 --ssb 48"
 
 # ---- Logging ----
 LOG_DIR="${SCRIPT_DIR}/logs"
@@ -42,6 +41,7 @@ mkdir -p "${LOG_DIR}"
 GNB_LOG="${LOG_DIR}/gnb_beam_switch.log"
 UE_LOG="${LOG_DIR}/ue_beam_switch.log"
 RESULT_LOG="${LOG_DIR}/test_result.log"
+CHMOD_FILE="${LOG_DIR}/rfsim_chmod_pathloss.txt"
 
 # Colors
 RED='\033[0;31m'
@@ -89,6 +89,7 @@ preflight() {
 # ---- Cleanup on exit ----
 GNB_PID=""
 UE_PID=""
+UE_ARGS=()
 
 cleanup() {
   info "Cleaning up..."
@@ -102,12 +103,12 @@ cleanup() {
 
 trap cleanup EXIT
 
-# ---- Telnet helper ----
-# Usage: telnet_cmd "rfsimu setpathloss rfsimu_channel_ue0 -20.0"
-telnet_cmd() {
-  local cmd="$1"
-  (echo "${cmd}"; sleep "${TELNET_TIMEOUT}"; echo "exit") \
-    | timeout 5 telnet localhost "${TELNET_PORT}" 2>/dev/null || true
+# ---- RFsim ChMod file helper ----
+write_chmod_pathloss() {
+  local pathloss="$1"
+  local tmp="${CHMOD_FILE}.tmp"
+  printf "# model_name path_loss_dB\nrfsimu_channel_ue0 %s\n" "${pathloss}" > "${tmp}"
+  mv "${tmp}" "${CHMOD_FILE}"
 }
 
 # ---- Start gNB ----
@@ -115,13 +116,45 @@ start_gnb() {
   info "Starting gNB (band257, 64-beam, symbol-level)..."
   RFSIMULATOR=server "${GNB_BINARY}" \
     -O "${GNB_CONF}" \
-    --sa \
     --rfsim \
-    --telnetsrv \
-    --telnetsrv.shrmod rfsim \
+    "--rfsimulator.[0].chmod_file" "${CHMOD_FILE}" \
+    "--rfsimulator.[0].chmod_poll_ms" 200 \
+    "--rfsimulator.[0].enable_beams" 1 \
+    "--rfsimulator.[0].num_concurrent_beams" 2 \
+    "--rfsimulator.[0].beam_map" 3 \
+    "--rfsimulator.[0].beam_gains" "0,-120" \
     > "${GNB_LOG}" 2>&1 &
   GNB_PID=$!
   info "gNB started (PID=${GNB_PID})"
+}
+
+# ---- Read UE parameters emitted by the gNB ----
+resolve_ue_args() {
+  info "Resolving UE command line parameters from gNB log..."
+  local elapsed=0
+  local line=""
+  local args=""
+
+  while [[ ${elapsed} -lt 15 ]]; do
+    line="$(grep -m1 "Command line parameters for OAI UE:" "${GNB_LOG}" 2>/dev/null || true)"
+    if [[ -n "${line}" ]]; then
+      args="$(sed -E 's/.*Command line parameters for OAI UE:[[:space:]]*//; s/[[:space:]]*$//' <<< "${line}")"
+      if [[ -n "${args}" ]]; then
+        read -r -a UE_ARGS <<< "${args}"
+        info "Using UE args from gNB log: ${args}"
+        return 0
+      fi
+    fi
+    if [[ -n "${GNB_PID}" ]] && ! kill -0 "${GNB_PID}" 2>/dev/null; then
+      warn "gNB exited before UE parameters were logged"
+      break
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  warn "Falling back to UE args: ${UE_FALLBACK_ARGS}"
+  read -r -a UE_ARGS <<< "${UE_FALLBACK_ARGS}"
 }
 
 # ---- Start UE ----
@@ -129,12 +162,9 @@ start_ue() {
   info "Starting OAI UE..."
   RFSIMULATOR=127.0.0.1 "${UE_BINARY}" \
     --rfsim \
-    -r 66 \
-    --numerology 3 \
-    --band 257 \
-    -C 27900000000 \
-    --ssb 576 \
-    --sa \
+    "--rfsimulator.enable_beams" 1 \
+    "--rfsimulator.beam_gains" "0,0" \
+    "${UE_ARGS[@]}" \
     > "${UE_LOG}" 2>&1 &
   UE_PID=$!
   info "UE started (PID=${UE_PID})"
@@ -171,46 +201,24 @@ wait_for_ra() {
 
 # ---- Inject channel variation scenario ----
 inject_channel_variation() {
-  info "Injecting channel variation scenario via telnet..."
+  info "Injecting channel variation scenario via RFsim ChMod file..."
 
   # Phase 1: Normal conditions (low path loss)
   info "  Phase 1: path_loss = -3.0 dB (good channel)"
-  telnet_cmd "rfsimu setpathloss rfsimu_channel_ue0 -3.0"
+  write_chmod_pathloss "-3.0"
   sleep 3
 
   # Phase 2: Degraded channel → should trigger beam switch
   info "  Phase 2: path_loss = -20.0 dB (degraded channel — expect beam switch)"
-  telnet_cmd "rfsimu setpathloss rfsimu_channel_ue0 -20.0"
+  write_chmod_pathloss "-20.0"
   sleep 5
 
   # Phase 3: Recovery
   info "  Phase 3: path_loss = -3.0 dB (recovered — possible beam switch back)"
-  telnet_cmd "rfsimu setpathloss rfsimu_channel_ue0 -3.0"
+  write_chmod_pathloss "-3.0"
   sleep 3
 
   info "Channel variation injection complete"
-}
-
-# ---- Fallback: use setdistance if setpathloss not available ----
-inject_channel_variation_distance() {
-  info "Injecting channel variation via distance changes..."
-
-  # Baseline distance
-  info "  Phase 1: distance = 100m"
-  telnet_cmd "rfsimu setdistance rfsimu_channel_ue0 100.0"
-  sleep 3
-
-  # Move far → signal degradation
-  info "  Phase 2: distance = 5000m (degraded — expect beam switch)"
-  telnet_cmd "rfsimu setdistance rfsimu_channel_ue0 5000.0"
-  sleep 5
-
-  # Move close → recovery
-  info "  Phase 3: distance = 100m (recovered)"
-  telnet_cmd "rfsimu setdistance rfsimu_channel_ue0 100.0"
-  sleep 3
-
-  info "Distance-based channel variation complete"
 }
 
 # ---- Check for beam switching events in gNB log ----
@@ -249,12 +257,12 @@ check_no_fatal_errors() {
 check_64beam_config() {
   info "Checking 64-beam SSB configuration..."
 
-  if grep -q "longBitmap\|ssb_PositionsInBurst.*64\|num_active_ssb.*64\|64 SSB" "${GNB_LOG}" 2>/dev/null; then
+  if grep -q "longBitmap\|ssb_PositionsInBurst.*64\|num_active_ssb.*64\|64 SSB\|num ssb 64" "${GNB_LOG}" 2>/dev/null; then
     info "64-beam SSB configuration confirmed"
     return 0
   fi
   # Even if not explicitly logged, check that beam scheduling is active
-  if grep -q "beam_mode.*PRECONFIGURED\|set_analog_beamforming.*1\|beam_duration.*-7" "${GNB_LOG}" 2>/dev/null; then
+  if grep -q "beam_mode.*PRECONFIGURED\|set_analog_beamforming.*1\|beam_duration.*-7\|Beam configuration:.*beams_per_period=2" "${GNB_LOG}" 2>/dev/null; then
     info "Symbol-level beam scheduling is active"
     return 0
   fi
@@ -281,11 +289,15 @@ main() {
   local failures=0
   local ra_ok=1
 
+  write_chmod_pathloss "-3.0"
+  info "Initialized RFsim ChMod file: ${CHMOD_FILE}"
+
   # Step 1: Start gNB
   start_gnb
   sleep 5
 
   # Step 2: Start UE
+  resolve_ue_args
   start_ue
   sleep 2
 
@@ -306,13 +318,9 @@ main() {
 
     # Step 6: Check for beam switching
     if ! check_beam_switch; then
-      warn "Beam switching not detected — trying distance-based fallback..."
-      inject_channel_variation_distance
-      if ! check_beam_switch; then
-        error "FAILED: No beam switching events detected"
-        test_result="FAIL"
-        failures=$((failures + 1))
-      fi
+      error "FAILED: No beam switching events detected"
+      test_result="FAIL"
+      failures=$((failures + 1))
     fi
   else
     warn "Skipping channel variation and beam-switch checks because RA did not complete"

@@ -907,12 +907,13 @@ dci_pdu_rel15_t prepare_dci_dl_payload(const gNB_MAC_INST *gNB_mac,
   dci_payload.rv = pdsch_pdu->rvIndex[0];
   dci_payload.vrb_to_prb_mapping.val = 0;
   int riv_bwp = pdsch_pdu->BWPSize;
-  if (!UE)
-    riv_bwp = gNB_mac->cset0_bwp_size;
-  else if (dl_BWP->dci_format == NR_DL_DCI_FORMAT_1_0 && ss_type == NR_SearchSpace__searchSpaceType_PR_common) {
-    if (gNB_mac->cset0_bwp_size > 0)
+  if (!UE) {
+    if (rnti_type != TYPE_SI_RNTI_)
       riv_bwp = gNB_mac->cset0_bwp_size;
-    else
+  } else if (dl_BWP->dci_format == NR_DL_DCI_FORMAT_1_0 && ss_type == NR_SearchSpace__searchSpaceType_PR_common) {
+    if (rnti_type != TYPE_RA_RNTI_ && gNB_mac->cset0_bwp_size > 0)
+      riv_bwp = gNB_mac->cset0_bwp_size;
+    else if (riv_bwp == 0)
       riv_bwp = UE->sc_info.initial_dl_BWPSize;
   }
   dci_payload.frequency_domain_assignment.val = PRBalloc_to_locationandbandwidth0(pdsch_pdu->rbSize, pdsch_pdu->rbStart, riv_bwp);
@@ -3824,7 +3825,7 @@ void reset_beam_status(NR_beam_info_t *beam_info, int frame, int slot, int16_t b
     return;
   const int index = get_beam_allocation_slot_index(beam_info, frame, slot, slots_per_frame);
   for (int i = 0; i < beam_info->beams_per_period; i++) {
-    for (int j = 0; j < NR_NUMBER_OF_SYMBOLS_PER_SLOT; j++) {
+    for (int j = 0; j < beam_info->beam_allocation_size[1]; j++) {
       if (IS_BIT_SET(beam_alloc, j) && beam_info->beam_allocation[i][index][j] == beam_index)
         beam_info->beam_allocation[i][index][j] = -1;
     }

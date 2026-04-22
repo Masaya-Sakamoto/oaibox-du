@@ -47,7 +47,7 @@
 
 static void nr_fill_rar(uint8_t Mod_idP, NR_UE_info_t *UE, uint8_t *dlsch_buffer, nfapi_nr_pusch_pdu_t *pusch_pdu);
 
-static const float ssb_per_rach_occasion[8] = {0.125, 0.25, 0.5, 1, 2, 4, 8};
+static const float ssb_per_rach_occasion[8] = {0.125, 0.25, 0.5, 1, 2, 4, 8, 16};
 
 static int16_t ssb_index_from_prach(module_id_t module_idP,
                                     frame_t frameP,
@@ -759,12 +759,13 @@ void nr_initiate_ra_proc(module_id_t module_idP,
 
   LOG_A(NR_MAC, "%d.%d UE RA-RNTI %04x TC-RNTI %04x: initiating RA procedure\n", frame, slot, ra->RA_rnti, UE->rnti);
 
-  // Configure RA BWP
-  configure_UE_BWP(nr_mac, scc, UE, true, NR_SearchSpace__searchSpaceType_PR_common, -1, -1);
   // return current SSB order in the list of tranmitted SSBs
   int n_ssb = ssb_index_from_prach(module_idP, frame, slot, preamble_index, freq_index, symbol);
   UE->UE_beam_index = get_beam_from_ssbidx(nr_mac, cc->ssb_index[n_ssb]);
   LOG_I(NR_MAC, "UE %04x: Sync beam index %d\n", UE->rnti, UE->UE_beam_index);
+  // Configure RA BWP after selecting the SSB/beam, because RA PDCCH
+  // monitoring can depend on the per-SSB type0 CSS configuration.
+  configure_UE_BWP(nr_mac, scc, UE, true, NR_SearchSpace__searchSpaceType_PR_common, -1, -1);
   NR_SCHED_UNLOCK(&nr_mac->sched_lock);
 }
 
@@ -1395,7 +1396,7 @@ static void prepare_dl_pdus(gNB_MAC_INST *nr_mac,
                      sched_ctrl->search_space,
                      coreset,
                      0, // parameter not needed for DCI 1_0
-                     nr_mac->cset0_bwp_size);
+                     sched_pdsch->bwp_info.bwpSize);
 
   LOG_D(NR_MAC, "BWPSize: %i\n", pdcch_pdu_rel15->BWPSize);
   LOG_D(NR_MAC, "BWPStart: %i\n", pdcch_pdu_rel15->BWPStart);
@@ -2186,6 +2187,15 @@ void nr_release_ra_UE(gNB_MAC_INST *mac, rnti_t rnti)
   }
 }
 
+static int slots_since(frame_t now_frame, slot_t now_slot, frame_t then_frame, slot_t then_slot, int slots_per_frame)
+{
+  const int slots_per_hyperframe = MAX_FRAME_NUMBER * slots_per_frame;
+  const int now = now_frame * slots_per_frame + now_slot;
+  const int then = then_frame * slots_per_frame + then_slot;
+  const int delta = (now - then + slots_per_hyperframe) % slots_per_hyperframe;
+  return delta < (slots_per_hyperframe / 2) ? delta : -1;
+}
+
 void nr_schedule_RA(module_id_t module_idP,
                     frame_t frameP,
                     slot_t slotP,
@@ -2203,6 +2213,28 @@ void nr_schedule_RA(module_id_t module_idP,
       NR_RA_t *ra = UE->ra;
       if (ra->ra_state != nrRA_gNB_IDLE)
         LOG_D(NR_MAC, "UE %04x frame.slot %d.%d RA state: %d\n", UE->rnti, frameP, slotP, ra->ra_state);
+
+      if (ra->ra_type == RA_4_STEP && ra->ra_state == nrRA_WAIT_Msg3) {
+        const int slots_frame = mac->frame_structure.numb_slots_frame;
+        const int age = slots_since(frameP, slotP, ra->Msg3_frame, ra->Msg3_slot, slots_frame);
+        if (age > slots_frame) {
+          LOG_W(NR_MAC,
+                "(%d.%d) RA Msg3 not received for UE 0x%04x scheduled at %d.%d, releasing RA process\n",
+                frameP,
+                slotP,
+                UE->rnti,
+                ra->Msg3_frame,
+                ra->Msg3_slot);
+          reset_beam_status(&mac->beam_info,
+                            ra->Msg3_frame,
+                            ra->Msg3_slot,
+                            UE->UE_beam_index,
+                            slots_frame,
+                            ra->Msg3_beam.new_beam);
+          nr_release_ra_UE(mac, UE->rnti);
+          continue;
+        }
+      }
 
       // Check RA Contention Resolution timer (TODO check this procedure)
       if (ra->ra_type == RA_4_STEP && ra->ra_state > nrRA_WAIT_Msg3) {

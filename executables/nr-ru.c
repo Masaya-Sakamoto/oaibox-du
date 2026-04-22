@@ -538,13 +538,19 @@ static void rx_rf(RU_t *ru, int *frame, int *slot)
   void *rxp[nb];
   for (int i = 0; i < nb; i++)
     rxp[i] = (void *)&ru->common.rxdata[i][get_samples_slot_timestamp(fp, *slot)];
+  void **rxp_beams[ru->num_beams_period];
+  for (int beam = 0; beam < ru->num_beams_period; beam++)
+    rxp_beams[beam] = &rxp[beam * ru->nb_rx];
 
   openair0_timestamp_t old_ts = proc->timestamp_rx;
   LOG_D(PHY,"Reading %d samples for slot %d (%p)\n", samples_per_slot, *slot, rxp[0]);
 
   openair0_timestamp_t ts;
   unsigned int rxs;
-  rxs = ru->rfdevice.trx_read_func(&ru->rfdevice, &ts, rxp, samples_per_slot, nb);
+  if (ru->num_beams_period > 1 && ru->rfdevice.trx_read_beams_func)
+    rxs = ru->rfdevice.trx_read_beams_func(&ru->rfdevice, &ts, rxp_beams, samples_per_slot, ru->nb_rx, ru->num_beams_period);
+  else
+    rxs = ru->rfdevice.trx_read_func(&ru->rfdevice, &ts, rxp, samples_per_slot, nb);
   proc->timestamp_rx = ts-ru->ts_offset;
 
   if (rxs != samples_per_slot)
@@ -739,14 +745,27 @@ void tx_rf(RU_t *ru, int frame,int slot, uint64_t timestamp)
   void *txp[nt];
   for (int i = 0; i < nt; i++)
     txp[i] = (void *)&ru->common.txdata[i][get_samples_slot_timestamp(fp, slot)] - sf_extension * sizeof(int32_t);
+  void **txp_beams[ru->num_beams_period];
+  for (int beam = 0; beam < ru->num_beams_period; beam++)
+    txp_beams[beam] = &txp[beam * ru->nb_tx];
 
   // prepare tx buffer pointers
-  uint32_t txs = ru->rfdevice.trx_write_func(&ru->rfdevice,
-                                             timestamp + ru->ts_offset - sf_extension,
-                                             txp,
-                                             siglen + sf_extension,
-                                             nt,
-                                             flags);
+  uint32_t txs;
+  if (ru->num_beams_period > 1 && ru->rfdevice.trx_write_beams_func)
+    txs = ru->rfdevice.trx_write_beams_func(&ru->rfdevice,
+                                            timestamp + ru->ts_offset - sf_extension,
+                                            txp_beams,
+                                            siglen + sf_extension,
+                                            ru->nb_tx,
+                                            ru->num_beams_period,
+                                            flags);
+  else
+    txs = ru->rfdevice.trx_write_func(&ru->rfdevice,
+                                      timestamp + ru->ts_offset - sf_extension,
+                                      txp,
+                                      siglen + sf_extension,
+                                      nt,
+                                      flags);
   LOG_D(PHY,
         "[TXPATH] RU %d tx_rf, writing to TS %lu, %d.%d, unwrapped_frame %d, slot %d, flags %d, siglen+sf_extension %d, "
         "returned %d, E %f\n",
@@ -1793,4 +1812,3 @@ static void NRRCconfig_RU(configmodule_interface_t *cfg)
   } // j=0..num_rus
   return;
 }
-

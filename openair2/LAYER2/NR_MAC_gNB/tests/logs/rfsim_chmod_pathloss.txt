@@ -1,0 +1,2 @@
+# model_name path_loss_dB
+rfsimu_channel_ue0 -3.0

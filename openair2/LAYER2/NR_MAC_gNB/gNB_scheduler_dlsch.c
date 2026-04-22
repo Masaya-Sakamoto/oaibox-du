@@ -401,13 +401,13 @@ bwp_info_t get_pdsch_bwp_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE)
       && sched_ctrl->search_space->searchSpaceType
       && sched_ctrl->search_space->searchSpaceType->present == NR_SearchSpace__searchSpaceType_PR_common) {
     if (sched_ctrl->coreset->controlResourceSetId == 0) {
-      bwp_info.bwpStart = nr_mac->cset0_bwp_start;
+      bwp_info.bwpStart = sched_ctrl->sched_pdcch.BWPStart;
     } else {
       int additional_offset = (dl_bwp->BWPStart + 5) / 6 * 6 - dl_bwp->BWPStart;
       bwp_info.bwpStart = dl_bwp->BWPStart + sched_ctrl->sched_pdcch.rb_start + additional_offset;
     }
-    if (nr_mac->cset0_bwp_size > 0) {
-      bwp_info.bwpSize = min(dl_bwp->BWPSize, nr_mac->cset0_bwp_size);
+    if (sched_ctrl->sched_pdcch.BWPSize > 0) {
+      bwp_info.bwpSize = min(dl_bwp->BWPSize, sched_ctrl->sched_pdcch.BWPSize);
     } else {
       bwp_info.bwpSize = min(dl_bwp->BWPSize, UE->sc_info.initial_dl_BWPSize);
     }

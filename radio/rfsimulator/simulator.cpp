@@ -1271,8 +1271,27 @@ static int rfsimulator_write_beams(openair0_device_t *device,
 
 static int rfsimulator_write(openair0_device_t *device, openair0_timestamp_t timestamp, void **buff, int nsamps, int cc, int flags)
 {
-  void **tmp = buff;
-  return rfsimulator_write_beams(device, timestamp, &tmp, nsamps, cc, 1, flags);
+  timestamp -= device->openair0_cfg->command_line_sample_advance;
+  int nsamps_initial = nsamps;
+  rfsimulator_state_t *t = static_cast<rfsimulator_state_t *>(device->priv);
+  void *samples[cc];
+  void **samples_ptr = samples;
+  for (int aatx = 0; aatx < cc; aatx++)
+    samples[aatx] = buff[aatx];
+  while (nsamps > 0) {
+    uint32_t nsamps_beam_map;
+    std::vector<int> beams = get_beams(&t->beam_ctrl->tx, timestamp, nsamps, &nsamps_beam_map);
+    std::vector<int> single_beam = {beams.front()};
+    rfsimulator_write_internal(t, timestamp, &samples_ptr, nsamps_beam_map, cc, single_beam, flags);
+    for (int aatx = 0; aatx < cc; aatx++) {
+      char *ptr = (char *)samples_ptr[aatx];
+      samples_ptr[aatx] = (void *)(ptr + nsamps_beam_map * sizeof(sample_t));
+    }
+    timestamp += nsamps_beam_map;
+    nsamps -= nsamps_beam_map;
+  }
+  clear_beam_queue(&t->beam_ctrl->tx, timestamp);
+  return nsamps_initial;
 }
 
 static bool add_client(rfsimulator_state_t *t)
@@ -1330,8 +1349,13 @@ static void process_recv_header(rfsimulator_state_t *t, buffer_t *b, bool first_
         LOG_E(HW, "rfsimulator receive 0 rx antennas\n");
       b->lastReceivedTS = b->th.timestamp;
     } else if (b->lastReceivedTS > (int64_t)b->th.timestamp) {
-      LOG_W(HW, "Received data in past: current is %lu, new reception: %lu!\n", b->lastReceivedTS, b->th.timestamp);
-      b->trashingPacket = true;
+      const uint64_t packet_end = b->th.timestamp + b->th.size;
+      if (b->lastReceivedTS >= (int64_t)packet_end) {
+        LOG_W(HW, "Received data in past: current is %lu, new reception: %lu!\n", b->lastReceivedTS, b->th.timestamp);
+        b->trashingPacket = true;
+      } else {
+        LOG_D(HW, "Received overlapping data: current is %lu, new reception: %lu!\n", b->lastReceivedTS, b->th.timestamp);
+      }
     }
   }
 
@@ -1693,7 +1717,7 @@ static int rfsimulator_read_beams(openair0_device_t *device,
   int nsamps_to_process = nsamps;
   while (nsamps_to_process > 0) {
     uint32_t nsamps_beam_map;
-    std::vector<int> rx_beams = get_beams(&t->beam_ctrl->tx, timestamp, nsamps_to_process, &nsamps_beam_map);
+    std::vector<int> rx_beams = get_beams(&t->beam_ctrl->rx, timestamp, nsamps_to_process, &nsamps_beam_map);
     if ((int)rx_beams.size() != num_beams) {
       LOG_D(HW,
             "Number of beams does not match application request num_beams %d, beam_map beams %lu\n",
