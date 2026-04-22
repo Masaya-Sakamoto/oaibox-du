@@ -66,6 +66,7 @@ extern int get_currentchannels_type(const char *buf,
 #include <sstream>
 #include <algorithm>
 #include <numeric>
+#include <exception>
 
 #define PORT 4043 // default TCP port for this simulator
 #define sampleToByte(a, b) ((a) * (b) * sizeof(sample_t))
@@ -194,6 +195,7 @@ typedef struct {
   int enable_beams;
   int num_concurrent_beams;
   std::vector<std::vector<float>> beam_gains;
+  std::vector<float> tx_beam_gains;
   beam_state_t tx;
   beam_state_t rx;
 } rfsim_beam_ctrl_t;
@@ -496,6 +498,17 @@ static float get_rx_gain_db(rfsimulator_state_t *rfsimulator, uint rx_beam, uint
   return rfsimulator->beam_ctrl->beam_gains[rx_beam][tx_beam];
 }
 
+static float get_tx_gain_db(rfsimulator_state_t *rfsimulator, uint tx_beam)
+{
+  if (!rfsimulator->beam_ctrl->enable_beams || rfsimulator->beam_ctrl->tx_beam_gains.empty())
+    return 0;
+
+  if (tx_beam >= rfsimulator->beam_ctrl->tx_beam_gains.size())
+    return 0;
+
+  return rfsimulator->beam_ctrl->tx_beam_gains[tx_beam];
+}
+
 static int rfsimulator_set_beams(openair0_device_t *device, uint64_t beam_map, openair0_timestamp_t timestamp)
 {
   rfsimulator_state_t *s = static_cast<rfsimulator_state_t *>(device->priv);
@@ -520,21 +533,20 @@ static int rfsimulator_set_beams_vector(openair0_device_t *device, int *beams, i
   return 0;
 }
 
-static void process_gains(char *str, rfsim_beam_ctrl_t *beam_ctrl)
+static void process_gains(const char *str, rfsim_beam_ctrl_t *beam_ctrl)
 {
-  int num_gains = 0;
-  float gain_array[MAX_BEAMS];
+  beam_ctrl->beam_gains.clear();
+  std::vector<float> gain_array;
   std::stringstream ss(str);
   std::string token;
-  while (std::getline(ss, token, ',') && num_gains < MAX_BEAMS) {
-    gain_array[num_gains++] = std::stof(token);
-  }
+  while (std::getline(ss, token, ',') && gain_array.size() < MAX_BEAMS)
+    gain_array.push_back(std::stof(token));
 
-  if (num_gains != 0) {
-    for (int i = 0; i < num_gains; i++) {
+  if (!gain_array.empty()) {
+    for (size_t i = 0; i < gain_array.size(); i++) {
       std::vector<float> beam_gains;
-      for (int j = 0; j < num_gains; j++) {
-        int diag = abs(i - j);
+      for (size_t j = 0; j < gain_array.size(); j++) {
+        int diag = i > j ? i - j : j - i;
         beam_gains.push_back(gain_array[diag]);
       }
       beam_ctrl->beam_gains.push_back(beam_gains);
@@ -835,6 +847,28 @@ static bool rfsimu_parse_chmod_line(const std::string &line, std::string *model_
   return (stream >> *model_name >> *pathloss_dB) && !(stream >> extra);
 }
 
+static bool rfsimu_parse_gain_line(const std::string &line, const char *directive, std::string *gains_csv)
+{
+  const size_t comment = line.find('#');
+  const std::string payload = rfsimu_trim(line.substr(0, comment));
+  if (payload.empty())
+    return false;
+
+  std::istringstream stream(payload);
+  std::string key;
+  std::string extra;
+  return (stream >> key >> *gains_csv) && key == directive && !(stream >> extra);
+}
+
+static bool rfsimu_set_beam_gains(rfsimulator_state_t *t,
+                                  const std::string &gains_csv,
+                                  std::string *old_gains,
+                                  std::string *new_gains);
+static bool rfsimu_set_tx_beam_gains(rfsimulator_state_t *t,
+                                     const std::string &gains_csv,
+                                     std::string *old_gains,
+                                     std::string *new_gains);
+
 static void rfsimu_poll_chmod_file(rfsimulator_state_t *t)
 {
   if (t == NULL || t->chmod_file == NULL || t->chmod_file[0] == '\0')
@@ -848,14 +882,6 @@ static void rfsimu_poll_chmod_file(rfsimulator_state_t *t)
       std::max<openair0_timestamp_t>(1, (openair0_timestamp_t)((t->sample_rate * t->chmod_poll_ms) / 1000.0));
   t->chmod_next_poll_ts = now + poll_samples;
 
-  if (t->channelmod == false) {
-    if (!t->chmod_channelmod_warning_logged) {
-      LOG_W(HW, "Ignoring RFsim channel modification file %s because channel modelisation is disabled\n", t->chmod_file);
-      t->chmod_channelmod_warning_logged = true;
-    }
-    return;
-  }
-
   std::ifstream input(t->chmod_file);
   if (!input.good()) {
     LOG_D(HW, "RFsim channel modification file %s is not readable yet\n", t->chmod_file);
@@ -866,11 +892,45 @@ static void rfsimu_poll_chmod_file(rfsimulator_state_t *t)
   int line_no = 0;
   while (std::getline(input, line)) {
     line_no++;
+    std::string gains_csv;
+    if (rfsimu_parse_gain_line(line, "beam_gains", &gains_csv)) {
+      std::string old_gains;
+      std::string new_gains;
+      if (!rfsimu_set_beam_gains(t, gains_csv, &old_gains, &new_gains)) {
+        LOG_W(HW, "Failed to apply RFsim beam_gains line %d in %s\n", line_no, t->chmod_file);
+        continue;
+      }
+      if (old_gains != new_gains)
+        LOG_I(HW, "beam_gains: %s -> %s (from %s)\n", old_gains.c_str(), new_gains.c_str(), t->chmod_file);
+      continue;
+    }
+
+    std::string tx_gains_csv;
+    if (rfsimu_parse_gain_line(line, "tx_beam_gains", &tx_gains_csv)) {
+      std::string old_gains;
+      std::string new_gains;
+      if (!rfsimu_set_tx_beam_gains(t, tx_gains_csv, &old_gains, &new_gains)) {
+        LOG_W(HW, "Failed to apply RFsim tx_beam_gains line %d in %s\n", line_no, t->chmod_file);
+        continue;
+      }
+      if (old_gains != new_gains)
+        LOG_I(HW, "tx_beam_gains: %s -> %s (from %s)\n", old_gains.c_str(), new_gains.c_str(), t->chmod_file);
+      continue;
+    }
+
     std::string model_name;
     double pathloss_dB = 0.0;
     if (!rfsimu_parse_chmod_line(line, &model_name, &pathloss_dB)) {
       if (!rfsimu_trim(line.substr(0, line.find('#'))).empty())
         LOG_W(HW, "Ignoring invalid RFsim channel modification line %d in %s: %s\n", line_no, t->chmod_file, line.c_str());
+      continue;
+    }
+
+    if (t->channelmod == false) {
+      if (!t->chmod_channelmod_warning_logged) {
+        LOG_W(HW, "Ignoring RFsim pathloss entries in %s because channel modelisation is disabled\n", t->chmod_file);
+        t->chmod_channelmod_warning_logged = true;
+      }
       continue;
     }
 
@@ -895,6 +955,159 @@ static void rfsimu_poll_chmod_file(rfsimulator_state_t *t)
               t->chmod_file);
     }
   }
+}
+
+static std::string rfsimu_beam_gains_matrix_to_string(const std::vector<std::vector<float>> &beam_gains)
+{
+  if (beam_gains.empty())
+    return "";
+
+  std::ostringstream stream;
+  for (size_t i = 0; i < beam_gains[0].size(); i++) {
+    if (i > 0)
+      stream << ",";
+    stream << beam_gains[0][i];
+  }
+  return stream.str();
+}
+
+static std::string rfsimu_beam_gains_to_string(const rfsim_beam_ctrl_t *beam_ctrl)
+{
+  if (beam_ctrl == NULL)
+    return "";
+  return rfsimu_beam_gains_matrix_to_string(beam_ctrl->beam_gains);
+}
+
+static std::string rfsimu_gain_vector_to_string(const std::vector<float> &gains)
+{
+  std::ostringstream stream;
+  for (size_t i = 0; i < gains.size(); i++) {
+    if (i > 0)
+      stream << ",";
+    stream << gains[i];
+  }
+  return stream.str();
+}
+
+static bool rfsimu_parse_gain_vector(const std::string &gains_csv, std::vector<float> *gains)
+{
+  if (gains == NULL)
+    return false;
+
+  std::vector<float> gain_array;
+  std::stringstream ss(gains_csv);
+  std::string token;
+  while (std::getline(ss, token, ',') && gain_array.size() < MAX_BEAMS)
+    gain_array.push_back(std::stof(token));
+
+  if (gain_array.empty())
+    return false;
+
+  *gains = gain_array;
+  return true;
+}
+
+static bool rfsimu_build_beam_gains_matrix(const std::string &gains_csv, std::vector<std::vector<float>> *beam_gains)
+{
+  if (beam_gains == NULL)
+    return false;
+
+  std::vector<float> gain_array;
+  if (!rfsimu_parse_gain_vector(gains_csv, &gain_array))
+    return false;
+
+  std::vector<std::vector<float>> candidate;
+  for (size_t i = 0; i < gain_array.size(); i++) {
+    std::vector<float> row;
+    for (size_t j = 0; j < gain_array.size(); j++) {
+      const size_t diag = i > j ? i - j : j - i;
+      row.push_back(gain_array[diag]);
+    }
+    candidate.push_back(row);
+  }
+
+  *beam_gains = candidate;
+  return true;
+}
+
+static bool rfsimu_set_beam_gains(rfsimulator_state_t *t, const std::string &gains_csv, std::string *old_gains, std::string *new_gains)
+{
+  if (t == NULL || t->beam_ctrl == NULL || gains_csv.empty())
+    return false;
+
+  if (old_gains != NULL)
+    *old_gains = rfsimu_beam_gains_to_string(t->beam_ctrl);
+
+  std::vector<std::vector<float>> candidate;
+  try {
+    if (!rfsimu_build_beam_gains_matrix(gains_csv, &candidate))
+      return false;
+  } catch (const std::exception &e) {
+    LOG_W(HW, "Invalid RFsim beam_gains value '%s': %s\n", gains_csv.c_str(), e.what());
+    return false;
+  }
+
+  const std::string candidate_gains = rfsimu_beam_gains_matrix_to_string(candidate);
+  if (new_gains != NULL)
+    *new_gains = candidate_gains;
+
+  if (old_gains != NULL && *old_gains == candidate_gains)
+    return true;
+
+  std::vector<std::vector<float>> &current = t->beam_ctrl->beam_gains;
+  if (current.size() == candidate.size()) {
+    bool same_shape = true;
+    for (size_t i = 0; i < current.size(); i++)
+      same_shape = same_shape && current[i].size() == candidate[i].size();
+
+    if (same_shape) {
+      for (size_t i = 0; i < current.size(); i++)
+        for (size_t j = 0; j < current[i].size(); j++)
+          current[i][j] = candidate[i][j];
+      return true;
+    }
+  }
+
+  current = candidate;
+  return true;
+}
+
+static bool rfsimu_set_tx_beam_gains(rfsimulator_state_t *t,
+                                     const std::string &gains_csv,
+                                     std::string *old_gains,
+                                     std::string *new_gains)
+{
+  if (t == NULL || t->beam_ctrl == NULL || gains_csv.empty())
+    return false;
+
+  std::vector<float> candidate;
+  try {
+    if (!rfsimu_parse_gain_vector(gains_csv, &candidate))
+      return false;
+  } catch (const std::exception &e) {
+    LOG_W(HW, "Invalid RFsim tx_beam_gains value '%s': %s\n", gains_csv.c_str(), e.what());
+    return false;
+  }
+
+  std::vector<float> &current = t->beam_ctrl->tx_beam_gains;
+  if (old_gains != NULL)
+    *old_gains = rfsimu_gain_vector_to_string(current);
+
+  const std::string candidate_gains = rfsimu_gain_vector_to_string(candidate);
+  if (new_gains != NULL)
+    *new_gains = candidate_gains;
+
+  if (old_gains != NULL && *old_gains == candidate_gains)
+    return true;
+
+  if (current.size() == candidate.size()) {
+    for (size_t i = 0; i < current.size(); i++)
+      current[i] = candidate[i];
+    return true;
+  }
+
+  current = candidate;
+  return true;
 }
 
 static int rfsimu_setpathloss_cmd(char *buff, int debug, telnet_printfunc_t prnt, void *arg)
@@ -1199,9 +1412,25 @@ static int rfsimulator_write_internal(rfsimulator_state_t *t,
 
       AssertFatal(num_beams > 0, "Must set at least one bit in beam_map\n");
       for (int beam = 0; beam < num_beams; beam++) {
+        const int tx_beam = tx_beams[indices[beam]];
+        const float gain_dB = get_tx_gain_db(t, tx_beam);
+        const float gain_linear = powf(10, gain_dB / 20.0);
+        std::vector<sample_t> scaled_samples;
         for (int a = 0; a < nbAnt; a++) {
           sample_t *in = (sample_t *)samplesVoid[indices[beam]][a];
-          fullwrite(b->conn_sock, (void *)in, sampleToByte(nsamps, 1), t);
+          if (gain_dB == 0.0f) {
+            fullwrite(b->conn_sock, (void *)in, sampleToByte(nsamps, 1), t);
+            continue;
+          }
+
+          scaled_samples.resize(nsamps);
+          for (int s = 0; s < nsamps; s++) {
+            const int32_t scaled_r = lroundf(in[s].r * gain_linear);
+            const int32_t scaled_i = lroundf(in[s].i * gain_linear);
+            scaled_samples[s].r = std::max<int32_t>(-32768, std::min<int32_t>(32767, scaled_r));
+            scaled_samples[s].i = std::max<int32_t>(-32768, std::min<int32_t>(32767, scaled_i));
+          }
+          fullwrite(b->conn_sock, (void *)scaled_samples.data(), sampleToByte(nsamps, 1), t);
         }
       }
     }

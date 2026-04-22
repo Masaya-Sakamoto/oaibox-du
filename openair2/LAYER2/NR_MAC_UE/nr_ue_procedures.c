@@ -1555,6 +1555,10 @@ int nr_ue_configure_pucch(NR_UE_MAC_INST_t *mac,
   NR_PUCCH_FormatConfig_t *pucchfmt;
   long *pusch_id = NULL;
   long *id0 = NULL;
+  if (!current_UL_BWP) {
+    LOG_W(NR_MAC, "Skipping PUCCH configuration in %d.%d: current UL BWP is not configured\n", frame, slot);
+    return -1;
+  }
   const int scs = current_UL_BWP->scs;
   int subframe_number = slot / (mac->frame_structure.numb_slots_frame / 10);
   pucch_pdu->rnti = rnti;
@@ -1563,6 +1567,10 @@ int nr_ue_configure_pucch(NR_UE_MAC_INST_t *mac,
   // configure pucch from Table 9.2.1-1
   // only for ack/nack
   if (pucch->initial_pucch_id > -1 && pucch->pucch_resource == NULL) {
+    if (!current_UL_BWP->pucch_ConfigCommon || !current_UL_BWP->pucch_ConfigCommon->pucch_ResourceCommon) {
+      LOG_W(NR_MAC, "Skipping initial PUCCH in %d.%d: pucch_ConfigCommon is not configured\n", frame, slot);
+      return -1;
+    }
     const int idx = *current_UL_BWP->pucch_ConfigCommon->pucch_ResourceCommon;
     const initial_pucch_resource_t pucch_resourcecommon = get_initial_pucch_resource(idx);
     pucch_pdu->format_type = pucch_resourcecommon.format;

@@ -1721,6 +1721,8 @@ static bool schedule_uci_on_pusch(NR_UE_MAC_INST_t *mac,
       int nr_of_symbols = 0;
       int start_symbol_index = 0;
       if (pucch->initial_pucch_id > -1 && pucch->pucch_resource == NULL) {
+        if (!current_UL_BWP || !current_UL_BWP->pucch_ConfigCommon || !current_UL_BWP->pucch_ConfigCommon->pucch_ResourceCommon)
+          return false;
         const int idx = *current_UL_BWP->pucch_ConfigCommon->pucch_ResourceCommon;
         const initial_pucch_resource_t pucch_resourcecommon = get_initial_pucch_resource(idx);
         start_symbol_index = pucch_resourcecommon.startingSymbolIndex;

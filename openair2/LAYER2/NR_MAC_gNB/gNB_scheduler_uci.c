@@ -1376,7 +1376,17 @@ void nr_sr_reporting(gNB_MAC_INST *nrmac, frame_t SFN, slot_t slot)
                                                          curr_pucch->nr_of_symb,
                                                          UE->UE_beam_index,
                                                          n_slots_frame);
-        AssertFatal(beam.idx >= 0, "Cannot allocate SR in any available beam\n");
+        if (beam.idx < 0) {
+          LOG_D(NR_MAC,
+                "Skipping SR for UE %04x in %d.%d: no beam available for PUCCH symbols %d..%d (UE beam %d)\n",
+                UE->rnti,
+                SFN,
+                slot,
+                curr_pucch->start_symb,
+                curr_pucch->start_symb + curr_pucch->nr_of_symb - 1,
+                UE->UE_beam_index);
+          continue;
+        }
         const int index = ul_buffer_index(SFN, slot, n_slots_frame, nrmac->vrb_map_UL_size);
         uint16_t *vrb_map_UL = &nrmac->common_channels[CC_id].vrb_map_UL[beam.idx][index * MAX_BWP_SIZE];
         bool ret = test_pucch0_vrb_occupation(curr_pucch,

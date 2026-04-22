@@ -41,7 +41,7 @@ mkdir -p "${LOG_DIR}"
 GNB_LOG="${LOG_DIR}/gnb_beam_switch.log"
 UE_LOG="${LOG_DIR}/ue_beam_switch.log"
 RESULT_LOG="${LOG_DIR}/test_result.log"
-CHMOD_FILE="${LOG_DIR}/rfsim_chmod_pathloss.txt"
+GNB_CHMOD_FILE="${LOG_DIR}/rfsim_chmod_gnb.txt"
 
 # Colors
 RED='\033[0;31m'
@@ -99,16 +99,22 @@ cleanup() {
   [[ -n "${UE_PID}" ]]  && kill -9 "${UE_PID}"  2>/dev/null || true
   [[ -n "${GNB_PID}" ]] && kill -9 "${GNB_PID}" 2>/dev/null || true
   wait 2>/dev/null || true
+  rm -f "${GNB_CHMOD_FILE}" "${GNB_CHMOD_FILE}.tmp"
 }
 
 trap cleanup EXIT
 
-# ---- RFsim ChMod file helper ----
-write_chmod_pathloss() {
+# ---- RFsim ChMod file helpers ----
+write_gnb_chmod_pathloss() {
   local pathloss="$1"
-  local tmp="${CHMOD_FILE}.tmp"
-  printf "# model_name path_loss_dB\nrfsimu_channel_ue0 %s\n" "${pathloss}" > "${tmp}"
-  mv "${tmp}" "${CHMOD_FILE}"
+  local tx_beam_gains="$2"
+  local tmp="${GNB_CHMOD_FILE}.tmp"
+  {
+    printf "# model_name path_loss_dB\n"
+    printf "rfsimu_channel_ue0 %s\n" "${pathloss}"
+    printf "tx_beam_gains %s\n" "${tx_beam_gains}"
+  } > "${tmp}"
+  mv "${tmp}" "${GNB_CHMOD_FILE}"
 }
 
 # ---- Start gNB ----
@@ -117,7 +123,7 @@ start_gnb() {
   RFSIMULATOR=server "${GNB_BINARY}" \
     -O "${GNB_CONF}" \
     --rfsim \
-    "--rfsimulator.[0].chmod_file" "${CHMOD_FILE}" \
+    "--rfsimulator.[0].chmod_file" "${GNB_CHMOD_FILE}" \
     "--rfsimulator.[0].chmod_poll_ms" 200 \
     "--rfsimulator.[0].enable_beams" 1 \
     "--rfsimulator.[0].num_concurrent_beams" 2 \
@@ -204,19 +210,19 @@ inject_channel_variation() {
   info "Injecting channel variation scenario via RFsim ChMod file..."
 
   # Phase 1: Normal conditions (low path loss)
-  info "  Phase 1: path_loss = -3.0 dB (good channel)"
-  write_chmod_pathloss "-3.0"
+  info "  Phase 1: path_loss = -3.0 dB, tx_beam_gains = 0,0 (good channel)"
+  write_gnb_chmod_pathloss "-3.0" "0,0"
   sleep 3
 
   # Phase 2: Degraded channel → should trigger beam switch
-  info "  Phase 2: path_loss = -20.0 dB (degraded channel — expect beam switch)"
-  write_chmod_pathloss "-20.0"
-  sleep 5
+  info "  Phase 2: path_loss = -20.0 dB, tx_beam_gains = -12,0 (degraded channel — expect beam switch)"
+  write_gnb_chmod_pathloss "-20.0" "-12,0"
+  sleep 8
 
   # Phase 3: Recovery
-  info "  Phase 3: path_loss = -3.0 dB (recovered — possible beam switch back)"
-  write_chmod_pathloss "-3.0"
-  sleep 3
+  info "  Phase 3: path_loss = -3.0 dB, tx_beam_gains = 0,0 (recovered — possible beam switch back)"
+  write_gnb_chmod_pathloss "-3.0" "0,0"
+  sleep 5
 
   info "Channel variation injection complete"
 }
@@ -289,8 +295,8 @@ main() {
   local failures=0
   local ra_ok=1
 
-  write_chmod_pathloss "-3.0"
-  info "Initialized RFsim ChMod file: ${CHMOD_FILE}"
+  write_gnb_chmod_pathloss "-3.0" "0,0"
+  info "Initialized RFsim gNB ChMod file: ${GNB_CHMOD_FILE}"
 
   # Step 1: Start gNB
   start_gnb
