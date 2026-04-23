@@ -49,7 +49,20 @@
           "title": "`4c6eece6` から `15063279` にかけて修正されたバグ",
           "file": "sections/01-rfsim/04-4c6eece6-15063279.md",
           "order": 3,
-          "children": []
+          "children": [
+            {
+              "title": "参照元 `beam_symbol_switch_2026_w15` との照合",
+              "file": "sections/01-rfsim/04-4c6eece6-15063279/01-beam-symbol-switch-2026-w15.md",
+              "order": 0,
+              "children": []
+            },
+            {
+              "title": "移植元・移植後修正・本来構成のスケジューラ比較",
+              "file": "sections/01-rfsim/04-4c6eece6-15063279/02-scheduler-flow-comparison.md",
+              "order": 1,
+              "children": []
+            }
+          ]
         },
         {
           "title": "RFsimに関係している問題",

@@ -64,6 +64,8 @@ UE側では、CellGroupConfig直後にUL BWPやPUCCH common configが未設定�
 
 ## `4c6eece6` から `15063279` にかけて修正されたバグ
 
+下表は `4c6eece6` から `15063279` にかけて実際に修正された問題の一覧である。続く子節では、これらが参照元 `beam_symbol_switch_2026_w15` にも残っていた問題なのか、移植しきれていなかった問題なのかを切り分け、scheduler 構成としてどの責務が過剰に結合しているかを整理する。
+
 | 領域 | `4c6eece6` 時点の症状 | 原因 | `15063279` での修正 | RFsim依存か |
 |---|---|---|---|---|
 | SIB1 TDA選択 | 64SSB構成で一部SSBのSIB1 TDAが取れないと `AssertFatal("Couldn't select any TDA for SIB1")` 相当でgNB全体が停止する。 | すべてのactive SSBでSIB1 TDAが必ず成立するという前提が残っていた。FR2 64SSBではType0 CSS/CORESET#0/mux patternにより、一部SSBのSIB1がそのslotで成立しないことがある。 | `schedule_nr_sib1()` で該当SSBだけを `LOG_W` してskipする。skip前にbeam allocationをresetし、active SSB全体で1件もSIB1を送れない場合だけfatalにする。 | いいえ。RFsimで顕在化したが、64SSBのscheduler防御として実機でも必要。 |
@@ -75,6 +77,174 @@ UE側では、CellGroupConfig直後にUL BWPやPUCCH common configが未設定�
 | UE PUCCH config | SA統合中、CellGroupConfig直後にUE MACが `current_UL_BWP->pucch_ConfigCommon->pucch_ResourceCommon` を参照して落ちる。 | UE側のUL BWPまたはPUCCH common configがまだ揃っていないタイミングを想定していなかった。 | `nr_ue_configure_pucch()` とUCI on PUSCH側にNULL guardを追加し、未設定なら警告してskipする。 | RFsim限定ではないが、今回のRFsim SA統合で顕在化した。根治には実機でも設定適用順序の確認が必要。 |
 | RFsim beam read/write | beam switching scenario中にRFsimの送受信beam状態やtimestamp処理が不安定になり、チャネル変動の効果を安定して再現できない。 | RFsimのbeam state参照、single-beam write、socket packet overlap処理が、今回のbeam switching用途に対して不足していた。 | RFsim内のbeam read/write、packet overlap、beam map/gain処理を補正する。 | はい。MAC schedulerではなくRFsim検証環境の問題。 |
 | チャネル変動注入 | Telnet注入では統合テストでBroken pipeやstdin空コマンドのノイズが出やすく、主経路にするには脆い。 | テストの刺激生成がTelnet I/Fに依存していた。 | ChMod high-level APIと `chmod_file` pollingを追加し、テストスクリプトはファイルをatomicに更新してpathloss/gainを変える。 | はい。RFsim用の刺激生成であり、実機RF制御ではない。 |
+
+### 参照元 `beam_symbol_switch_2026_w15` との照合
+参照元 `beam_symbol_switch_2026_w15` は `2026.w15` 上の実験的実装であり、今回の移植後修正がすべて移植漏れだったわけではない。ここでは隣接ツリー `../beam_symbol_switch_2026_w15` の HEAD `4761812412` を基準に、`4c6eece6` 時点の移植直後実装と `15063279` 以降の修正内容を照合する。
+
+| 領域 | 参照元での状態 | `4c6eece6` 時点の状態 | 判定 | 現在の整理 |
+|---|---|---|---|---|
+| SIB1 TDA / PDSCH beam 失敗 | `schedule_nr_sib1()` が SSB ごとに TDA と beam を選ぶが、TDA 不成立や SIB1 beam 不足を `AssertFatal()` で扱う。 | 参照元と同様に、一部 SSB の不成立が gNB 全体の fatal になりうる。 | 参照元由来 | `15063279` では SSB 単位で skip し、送信候補が全滅した場合だけ fatal とする整理に変更した。 |
+| SIB1 BWP/RIV | 参照元にも global `cset0_bwp_size` と initial BWP 前提が残り、Type0 CSS の BWP と完全には分離されていない。 | Type0 CSS 対応を移植したが、RIV/DCI 幅の一部に initial BWP 前提が残った。 | 参照元由来 + 移植後調整不足 | Type0 CSS の `cset_start_rb` / `num_rbs` を使うように寄せ、SIB1 用 PDSCH/PDCCH BWP の局所不整合を解消した。 |
+| RA BWP 構成順序 | PRACH 由来の SSB index から `UE_beam_index` を決めたあとに `configure_UE_BWP()` を呼ぶ。 | `configure_UE_BWP()` が beam 決定より前に呼ばれ、RA 用 BWP が同期 SSB/beam を見られない。 | 移植漏れ | 参照元の正しい順序に戻し、PRACH 由来 beam を RA context に反映してから BWP を構成する。 |
+| `ssb_per_rach_occasion` の sixteen 対応 | 配列定義が `0.125` から `8` までで、`16` に対応する要素がない。 | 参照元と同じく `16` が未定義。境界条件で SSB index 計算が壊れる。 | 参照元由来 | `16` を明示的に追加し、設定値が sixteen の場合でも PRACH から SSB を決められるようにした。 |
+| Msg3 未受信時の beam 解放 / RA release | WAIT_Msg3 が長く残った場合に、予約済み Msg3 beam を aging で解放する防御がない。 | 同様に RA proc が残り続け、後続 RA/SR/SIB1 の beam 競合を誘発しうる。 | 参照元由来の運用防御不足 | WAIT_Msg3 の経過 slot を見て RA proc を release し、`Msg3_beam` も reset する。 |
+| SR / PUCCH beam allocation 失敗 | `nr_sr_reporting()` が SR 用 PUCCH beam 不足を `AssertFatal()` として扱う。 | 同様に SR の一時的な beam 競合で gNB が停止しうる。 | 参照元由来 | SR は UCI/PUCCH scheduling の資源競合として skip し、次 slot 以降の retry に委ねる。 |
+| Beam switch 通知と frame/slot 伝搬 | beam switch は `UE_beam_index` 更新と RRC reconfiguration trigger に閉じており、外部 antenna control event や frame/slot 情報はない。 | RRC reconfiguration trigger も持たず、内部 beam index 更新に近い形で移植されていた。 | 新規要求 / 設計差分 + 移植差分 | `beam_switch_event_t` に frame/slot と old/new beam を持たせ、`antenna_control_if_t` に通知する境界を追加した。 |
+
+この照合から、明確な移植漏れと言えるのは RA BWP 構成順序である。一方で、SIB1/SR の fatal、`ssb_per_rach_occasion` の `16` 欠落、Msg3 待ち RA proc の残留は参照元にも残っていた実験実装上の粗さであり、移植後の RFsim/USRP 検証で gNB 生存性の問題として顕在化したものと見なせる。
+
+### 移植元・移植後修正・本来構成のスケジューラ比較
+ここでは、参照元の実験的な流れ、`15063279` 以降の防御付き実装、本来あるべき責務分離の3段階を並べる。3つ目は今回実装した差分そのものではなく、調査から見えた scheduler 構成の整理案である。
+
+#### 移植元 `beam_symbol_switch_2026_w15` の実験的な流れ
+
+参照元では channel-specific scheduler が必要な場面で直接 `beam_allocation_procedure()` を呼び、beam が取れない場合は多くの経路で fatal または即 return になる。SIB1 scheduler は SSB ごとの Type0 CSS/TDA/beam を扱うが、一部 SSB の不成立を通常の scheduling miss として扱わない。RA scheduler は PRACH 由来 beam を BWP 構成前に決める点は正しいが、beam switch は `UE_beam_index` 更新と RRC reconfiguration trigger 寄りで、外部アンテナ制御との明示的な境界を持たない。
+
+```mermaid
+sequenceDiagram
+  participant Tick as Slot tick
+  participant SIB1 as SIB1 scheduler
+  participant RA as RA scheduler
+  participant SR as SR/PUCCH scheduler
+  participant Alloc as beam_allocation_procedure
+  participant Switch as beam_switching_procedure
+  participant UE as UE state / RRC
+
+  Tick->>SIB1: schedule_nr_sib1()
+  SIB1->>Alloc: reserve PDCCH beam
+  alt no PDCCH beam
+    SIB1-->>Tick: AssertFatal
+  else PDCCH beam reserved
+    SIB1->>SIB1: select Type0 CSS and TDA
+    alt no valid TDA for this SSB
+      SIB1-->>Tick: AssertFatal
+    else TDA exists
+      SIB1->>Alloc: reserve PDSCH beam
+      alt no PDSCH beam
+        SIB1-->>Tick: AssertFatal
+      else SIB1 scheduled
+        SIB1-->>Tick: emit SIB1 DL PDUs
+      end
+    end
+  end
+
+  Tick->>RA: PRACH detected
+  RA->>RA: derive SSB and beam from PRACH
+  RA->>RA: configure_UE_BWP()
+  RA->>Alloc: reserve Msg2 / Msg3 / Msg4 beams
+
+  Tick->>SR: nr_sr_reporting()
+  SR->>Alloc: reserve PUCCH beam for SR
+  alt no PUCCH beam
+    SR-->>Tick: AssertFatal
+  else SR scheduled
+    SR-->>Tick: emit PUCCH SR
+  end
+
+  Tick->>Switch: beam decision
+  Switch->>UE: update UE_beam_index
+  Switch->>UE: trigger RRC reconfiguration
+  Note over SIB1,SR: Ordinary beam contention can cross into process fatal paths.
+```
+
+#### `15063279` 以降の防御付きの流れ
+
+移植後修正では、SIB1 の候補 SSB 単位 skip、RA の beam 決定後 BWP 構成、SR の beam 不足 skip、beam switch event の外部通知を追加した。これにより、beam availability の一時的な不足を scheduler の通常の失敗として扱える範囲が広がった。
+
+```mermaid
+sequenceDiagram
+  participant Tick as Slot tick
+  participant SIB1 as SIB1 scheduler
+  participant RA as RA scheduler
+  participant SR as SR/PUCCH scheduler
+  participant Alloc as beam_allocation_procedure
+  participant Switch as beam switch decision
+  participant Ant as antenna_control_if_t
+
+  Tick->>SIB1: schedule_nr_sib1()
+  loop active SSB candidates
+    SIB1->>SIB1: resolve Type0 CSS BWP and TDA
+    alt no valid TDA or BWP for candidate
+      SIB1-->>SIB1: skip this SSB
+    else TDA/BWP valid
+      SIB1->>Alloc: reserve PDCCH and PDSCH beams
+      alt beam unavailable
+        SIB1-->>SIB1: reset reservation and skip this SSB
+      else beam reserved
+        SIB1-->>Tick: emit SIB1 DL PDUs
+      end
+    end
+  end
+  alt all attempted SSBs failed
+    SIB1-->>Tick: fatal configuration failure
+  end
+
+  Tick->>RA: PRACH detected
+  RA->>RA: derive SSB and beam from PRACH
+  RA->>RA: configure_UE_BWP() after beam selection
+  RA->>Alloc: reserve RA beams
+  opt WAIT_Msg3 ages out
+    RA->>Alloc: release Msg3 beam
+    RA-->>Tick: release RA proc
+  end
+
+  Tick->>SR: nr_sr_reporting()
+  SR->>Alloc: reserve PUCCH beam for SR
+  alt beam unavailable
+    SR-->>Tick: skip SR in this slot
+  else SR scheduled
+    SR-->>Tick: emit PUCCH SR
+  end
+
+  Tick->>Switch: beam switch decision with frame/slot
+  Switch->>Ant: notify beam_switch_event_t
+  Ant-->>Switch: accepted by adapter boundary
+```
+
+#### 本来あるべき scheduler 構成
+
+本来の構成では、`beam_allocation_procedure()` は scheduler 共通の beam resource allocator として維持し、SIB1/RA/DL/UL/UCI scheduler はそれぞれの channel 仕様、TDA、HARQ、RB/CCE/PUCCH 選択に集中するのが望ましい。beam availability の不足は原則として「その候補を skip / retry」扱いにし、設定矛盾や全候補不成立だけを fatal とする。外部アンテナ制御は scheduler thread から重い I/O を直接実行せず、`antenna_control_if_t` を queue 投入または非同期 adapter の境界として扱う。
+
+```mermaid
+sequenceDiagram
+  participant Tick as Slot tick
+  participant Sched as SIB1/RA/DL/UL/UCI schedulers
+  participant Helper as BWP/TDA/HARQ helpers
+  participant Alloc as common beam allocator
+  participant Policy as beam policy
+  participant Events as event queue
+  participant Adapter as antenna adapter
+  participant RF as RF / antenna control
+
+  Tick->>Sched: build channel-specific candidates
+  Sched->>Helper: resolve BWP, TDA, HARQ, RB/CCE/PUCCH
+  Helper-->>Sched: normalized scheduling request
+  Sched->>Policy: ask preferred beam for request
+  Policy->>Alloc: reserve or update beam resource
+  alt beam resource available
+    Alloc-->>Sched: reservation granted
+    Sched-->>Tick: emit FAPI PDUs
+  else temporary resource contention
+    Alloc-->>Sched: no beam for this candidate
+    Sched-->>Tick: skip or retry later
+  else invalid configuration or all candidates failed
+    Alloc-->>Sched: configuration failure
+    Sched-->>Tick: fatal with explicit reason
+  end
+
+  Policy->>Events: publish beam_switch_event_t
+  Events->>Adapter: async dispatch outside scheduler hot path
+  Adapter->>RF: apply antenna control
+  RF-->>Adapter: completion or error
+  Note over Sched,Helper: Channel schedulers own channel rules; shared helpers own cross-channel BWP/TDA/resource normalization.
+```
+
+#### 責務侵害として見える点
+
+- SIB1 scheduler が Type0 CSS/BWP/RIV 補正を局所的に抱えすぎている。共通の PDCCH/PDSCH BWP 解決 helper に寄せるのが望ましい。
+- RA scheduler が beam 決定、BWP 構成、Msg2/Msg4 resource selection を強く結合している。RA context に同期 SSB/beam を保存し、BWP/PDCCH helper がそれを読む構成が望ましい。
+- UCI/SR scheduler が beam 不足を fatal にすると、PUCCH scheduling の資源競合判定を越えて gNB 生存性を侵害する。
+- beam switch 処理が RRC reconfiguration やアンテナ制御を直接実行する設計は危険である。scheduler の責務は decision/event 発行までに留め、重い I/O は非同期 adapter 側へ逃がすべきである。
 
 ## RFsimに関係している問題
 
