@@ -140,7 +140,7 @@ sequenceDiagram
   Events->>Adapter: async dispatch outside scheduler hot path
   Adapter->>RF: apply antenna control
   RF-->>Adapter: completion or error
-  Note over Sched,Helper: Channel schedulers own channel rules; shared helpers own cross-channel BWP/TDA/resource normalization.
+  Note over Sched,Helper: Channel schedulers own channel rules. shared helpers own cross-channel BWP/TDA/resource normalization.
 ```
 
 #### 責務侵害として見える点
