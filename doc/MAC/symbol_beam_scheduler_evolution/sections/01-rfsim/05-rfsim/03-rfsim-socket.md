@@ -1,0 +1,4 @@
+
+RFsimのsocket buffer、timestamp overlap、beam read/write処理の補正は、今回の統合テストを安定させるために重要だった。特に、beamごとに送信区間が分かれると、単純なsingle-buffer writeや過去timestamp packetの扱いがテストの成否に影響する。
+
+ただし、これはRFsim transportの整合性問題であり、MAC schedulerの正しさそのものではない。実機移行時には、RFsim socketの補正を持ち込むのではなく、RU/PHY/FAPI経路がbeam IDと送受信タイミングをどう扱うかを別途確認する。

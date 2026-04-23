@@ -114,9 +114,13 @@ RFsimのsocket buffer、timestamp overlap、beam read/write処理の補正は、
 
 ## USRPなど実機移行時の注意
 
+この章でいう実機移行は、RFsimをUSRPへ置き換えるだけの話ではない。想定する実験系はOTAであり、PC、USRP、アレイアンテナモジュールが協調して動作すること自体は既に成立している前提である。
+
+今回のミソは、その既存のOTA制御系を、今回追加したMAC schedulerのbeam decisionと `antenna_control_if_t` に接続することである。RFsimでは `pathloss` や `tx_beam_gains` を人工的に変えてbeam switchを誘発したが、実機ではUEがOTAで観測するSSB/CSIの変化と、アレイアンテナモジュールへ投入するbeam table/位相設定が実際の制御対象になる。
+
 ### そのまま維持すべき部分
 
-以下はRFsimだけの回避ではなく、symbol-level beam schedulerとして維持すべき修正である。
+以下はRFsimだけの回避ではなく、OTAでも必要なMAC decisionの安定化として維持すべき修正である。実機ではRFsimよりも測定遅延、RF制御遅延、OTAチャネル変動が大きくなるため、schedulerが「一部の資源が置けない」状態でgNB全体を落とさないことがより重要になる。
 
 * 64SSB時に一部SSBのSIB1 TDA失敗をgNB全体のfatalにしない防御。
 * SIB1/RA/SI-RNTI/RA-RNTIのBWP size/start/RIVを対象BWPに合わせる修正。
@@ -124,34 +128,41 @@ RFsimのsocket buffer、timestamp overlap、beam read/write処理の補正は、
 * SR/PUCCH用beam allocation失敗を通常の資源競合として扱う修正。
 * `UE_beam_index` 更新を `antenna_control_if_t` へ通知する境界。
 
-これらは、RFsimで顕在化したとしても、実機の64SSB/analog beamforming構成でも必要になる可能性が高い。
+これらは、RFsimで顕在化したとしても、実機の64SSB/analog beamforming構成でも維持すべきである。特に `antenna_control_if_t` は、MACが選んだ `new_beam_index` をPC側のアンテナ制御プロセスへ渡すための最小境界として扱う。
 
 ### 置き換えが必要な部分
 
-以下はRFsim検証用の仕組みであり、実機では置き換えが必要である。
+以下はRFsim検証用の仕組みであり、OTA実機では置き換えが必要である。
 
 * `chmod_file` pollingによるpathloss変更。
 * `rfsimu setpathloss` によるchannel model操作。
 * `beam_gains` / `tx_beam_gains` によるsample scaling。
 * `run_beam_switch_test.sh` のRFsim ChMod file注入シナリオ。
 
-実機では、`antenna_control_if_t` のdefault loggerを、RU/USRP/フロントホール側のbeam制御へ接続する必要がある。どのbeam IDを、どの時刻に、どのRF chainまたはprecoderへ反映するかは、RFsimの `tx_beam_gains` ではなく実機制御面の仕様として決める必要がある。
+実機では、これらをアレイアンテナモジュール制御、USRP RF経路、OTAで実際に発生するチャネル変動へ置き換える。つまり、`path_loss_dB` をファイルで書き換えるのではなく、UEがOTAで観測するSSB/CSIの変化を入力にし、MACが選んだbeamをアレイアンテナモジュールのbeam tableまたは位相設定へ反映する。
+
+`antenna_control_if_t` のdefault loggerは実機制御ではない。実機では `on_beam_switch` の実装を差し替え、`beam_switch_event_t.new_beam_index` をPC側のアンテナ制御コマンドへ変換する必要がある。USRP自体はRF sampleの送受信経路を担い、beam方向の実制御はアレイアンテナモジュール側の既存制御APIに接続する、という責務分担で整理する。
 
 ### 追加確認が必要な部分
 
-実機移行時には、少なくとも以下を確認する。
+実機移行時には、少なくとも以下を確認する。焦点は、MAC schedulerの判断をOTA制御系へ安全に渡す接続点である。
 
-* MACが設定するFAPI beam IDをPHY/RUが実際に消費しているか。ログ上のbeam switchだけでは、RFが向いているとは限らない。
-* `LOPHY_BEAM_IDX` と通常beam indexの扱いが、対象RU/USRP構成のFAPI実装と一致するか。
-* 64SSB、CORESET#0、searchSpaceZero、SIB1 TDAが、対象band/numerology/SSB bitmapで妥当か。
-* RFsimの簡易gain変動で得たCSI/SSB RSRP変化と、実機UEが報告する測定周期、filtering、CSI report timingが一致するか。
+* `antenna_control_if_t.on_beam_switch` を、PC上のアレイアンテナ制御プロセスへ接続する。scheduler thread内で同期的に呼ばれるため、callback内でUSB/serial/socket I/Oを直接待たず、制御要求をqueueへ積んで別thread/processで処理する。
+* `beam_switch_event_t.new_beam_index` とアレイアンテナモジュールのbeam tableを1対1または変換表で対応させる。MACのbeam index、FAPI beam ID、アンテナモジュールのbeam番号が同じとは限らないため、対応表を明示的に持つ。
+* `event.frame` / `event.slot` と実アンテナ制御の反映時刻をログで相関できるようにする。OTAでは制御遅延があるため、「schedulerが決めたslot」と「アンテナが実際に切り替わった時刻」を分けて観測する。
+* MACが設定するFAPI beam IDをPHY/RUが実際に消費しているかを確認する。ログ上のbeam switchだけでは、RFが向いているとは限らない。
+* `LOPHY_BEAM_IDX` と通常beam indexの扱いが、対象USRP/RU構成のFAPI実装と一致するかを確認する。
+* 64SSB、CORESET#0、searchSpaceZero、SIB1 TDAが、対象band/numerology/SSB bitmapで妥当かを確認する。
+* RFsimの簡易gain変動で得たCSI/SSB RSRP変化と、実機UEが報告する測定周期、filtering、CSI report timingが一致しない可能性を前提に評価する。
 * UE PUCCH guardはクラッシュ回避であり、実機運用ではPUCCH common configがいつ有効になるべきかを別途確認する。
 
 ### 過度に手を入れた可能性がある部分
 
 今回の到達点では、統合テストを進めるためにRFsim側へ多くの刺激生成機構を追加している。特に `tx_beam_gains` は、UE側のChMod pollingを避けつつgNB側から見える送信beam差を作るための検証支援である。
 
-この設計はRFsimテストとしては有用だが、実機移行時にそのまま拡張すべき抽象ではない。実機用には、MAC schedulerのdecisionである `beam_switch_event_t` と、RF/RUが消費するbeam control commandを結ぶ薄いadapterを別途作る方が自然である。
+この設計はRFsimテストとしては有用だが、実機制御抽象として拡張すべきではない。OTA実機では、sample scalingでbeam差を作るのではなく、既存のPC/USRP/アレイアンテナモジュール協調系を使って、実アンテナのbeam tableまたは位相設定を切り替える。
+
+また、`create_default_antenna_ctrl()` が提供するdefault loggerは、実機制御が接続されたことを意味しない。実機用には、MAC schedulerのdecisionである `beam_switch_event_t` と、アレイアンテナモジュールが消費するbeam control commandを結ぶadapterを別途実装する必要がある。このadapterは、scheduler threadをblockしないこと、beam index変換を明示すること、制御遅延をログで追跡できることを最低条件にする。
 
 ## 検証と根拠
 
@@ -189,14 +200,20 @@ RFsim統合テストでは、gNBログで以下を確認する。
 
 ## Appendix: `mdsplit` での保守手順
 
-この資料は単一Markdownとして管理する。ただし、章構造を確認しながら大きな改稿を行う場合は `mdsplit` を一時作業用に使える。
+この資料は、`mdsplit` の分解成果物を原本として管理する。単一Markdownの `doc/MAC/symbol_beam_scheduler_evolution.md` は、原本から再構成した表示・レビュー用の成果物である。
 
 ```bash
-mdsplit decompose doc/MAC/symbol_beam_scheduler_evolution.md -o /tmp/mdsplit_symbol_beam
-mdsplit verify /tmp/mdsplit_symbol_beam/hierarchy.json
-mdsplit compose /tmp/mdsplit_symbol_beam/hierarchy.json -o /tmp/symbol_beam_scheduler_evolution.md
+mdsplit verify doc/MAC/symbol_beam_scheduler_evolution/hierarchy.json
+mdsplit compose doc/MAC/symbol_beam_scheduler_evolution/hierarchy.json -o doc/MAC/symbol_beam_scheduler_evolution.md
 ```
 
-`/tmp/mdsplit_symbol_beam/sections/` 以下では、章ごとにMarkdownを確認できる。`hierarchy.json` には見出し階層、section file、順序がJSONとして保存される。通常は `/tmp` 上で再構成結果を確認し、必要な変更だけを最終Markdownへ反映する。
+`doc/MAC/symbol_beam_scheduler_evolution/sections/` 以下では、章ごとにMarkdownを確認できる。`hierarchy.json` には見出し階層、section file、順序がJSONとして保存される。本文を編集する場合は原則としてsection fileを更新し、`mdsplit compose` で単一Markdownへ反映する。
 
-分割済みsectionファイルや `hierarchy.json` は、保守補助の一時ファイルとして扱い、標準のレビュー対象にはしない。
+compose結果を確認するだけなら、以下のように `/tmp` へ出力して差分を見る。
+
+```bash
+mdsplit compose doc/MAC/symbol_beam_scheduler_evolution/hierarchy.json -o /tmp/symbol_beam_scheduler_evolution.md
+diff -u /tmp/symbol_beam_scheduler_evolution.md doc/MAC/symbol_beam_scheduler_evolution.md
+```
+
+分解原本と単一Markdownのどちらか一方だけを変更すると内容がずれるため、レビュー時には両方が同じ内容を表していることを確認する。

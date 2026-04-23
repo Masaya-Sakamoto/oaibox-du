@@ -1,0 +1,131 @@
+{
+  "source_file": "symbol_beam_scheduler_evolution.md",
+  "base_level": 1,
+  "metadata": {},
+  "sections": [
+    {
+      "title": "シンボル単位ビームスケジューラの変遷とRFsim検証メモ",
+      "file": "sections/01-rfsim.md",
+      "order": 0,
+      "children": [
+        {
+          "title": "結論",
+          "file": "sections/01-rfsim/01-section.md",
+          "order": 0,
+          "children": []
+        },
+        {
+          "title": "コミット系列の位置づけ",
+          "file": "sections/01-rfsim/02-section.md",
+          "order": 1,
+          "children": []
+        },
+        {
+          "title": "スケジューラ挙動の変化",
+          "file": "sections/01-rfsim/03-section.md",
+          "order": 2,
+          "children": [
+            {
+              "title": "`8259d8e` 時点",
+              "file": "sections/01-rfsim/03-section/01-8259d8e.md",
+              "order": 0,
+              "children": []
+            },
+            {
+              "title": "`4c6eece6` 時点",
+              "file": "sections/01-rfsim/03-section/02-4c6eece6.md",
+              "order": 1,
+              "children": []
+            },
+            {
+              "title": "`15063279` 時点",
+              "file": "sections/01-rfsim/03-section/03-15063279.md",
+              "order": 2,
+              "children": []
+            }
+          ]
+        },
+        {
+          "title": "`4c6eece6` から `15063279` にかけて修正されたバグ",
+          "file": "sections/01-rfsim/04-4c6eece6-15063279.md",
+          "order": 3,
+          "children": []
+        },
+        {
+          "title": "RFsimに関係している問題",
+          "file": "sections/01-rfsim/05-rfsim.md",
+          "order": 4,
+          "children": [
+            {
+              "title": "ChModとpathloss注入",
+              "file": "sections/01-rfsim/05-rfsim/01-chmodpathloss.md",
+              "order": 0,
+              "children": []
+            },
+            {
+              "title": "`beam_gains` と `tx_beam_gains`",
+              "file": "sections/01-rfsim/05-rfsim/02-beam-gains-tx-beam-gains.md",
+              "order": 1,
+              "children": []
+            },
+            {
+              "title": "RFsim socket処理",
+              "file": "sections/01-rfsim/05-rfsim/03-rfsim-socket.md",
+              "order": 2,
+              "children": []
+            },
+            {
+              "title": "統合テストスクリプトとFR2 64SSB設定",
+              "file": "sections/01-rfsim/05-rfsim/04-fr2-64ssb.md",
+              "order": 3,
+              "children": []
+            }
+          ]
+        },
+        {
+          "title": "USRPなど実機移行時の注意",
+          "file": "sections/01-rfsim/06-usrp.md",
+          "order": 5,
+          "children": [
+            {
+              "title": "そのまま維持すべき部分",
+              "file": "sections/01-rfsim/06-usrp/01-section.md",
+              "order": 0,
+              "children": []
+            },
+            {
+              "title": "置き換えが必要な部分",
+              "file": "sections/01-rfsim/06-usrp/02-section.md",
+              "order": 1,
+              "children": []
+            },
+            {
+              "title": "追加確認が必要な部分",
+              "file": "sections/01-rfsim/06-usrp/03-section.md",
+              "order": 2,
+              "children": []
+            },
+            {
+              "title": "過度に手を入れた可能性がある部分",
+              "file": "sections/01-rfsim/06-usrp/04-section.md",
+              "order": 3,
+              "children": []
+            }
+          ]
+        },
+        {
+          "title": "検証と根拠",
+          "file": "sections/01-rfsim/07-section.md",
+          "order": 6,
+          "children": []
+        },
+        {
+          "title": "Appendix: `mdsplit` での保守手順",
+          "file": "sections/01-rfsim/08-appendix-mdsplit.md",
+          "order": 7,
+          "children": []
+        }
+      ]
+    }
+  ]
+}

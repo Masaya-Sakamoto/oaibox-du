@@ -1,0 +1,6 @@
+
+今回の到達点では、統合テストを進めるためにRFsim側へ多くの刺激生成機構を追加している。特に `tx_beam_gains` は、UE側のChMod pollingを避けつつgNB側から見える送信beam差を作るための検証支援である。
+
+この設計はRFsimテストとしては有用だが、実機制御抽象として拡張すべきではない。OTA実機では、sample scalingでbeam差を作るのではなく、既存のPC/USRP/アレイアンテナモジュール協調系を使って、実アンテナのbeam tableまたは位相設定を切り替える。
+
+また、`create_default_antenna_ctrl()` が提供するdefault loggerは、実機制御が接続されたことを意味しない。実機用には、MAC schedulerのdecisionである `beam_switch_event_t` と、アレイアンテナモジュールが消費するbeam control commandを結ぶadapterを別途実装する必要がある。このadapterは、scheduler threadをblockしないこと、beam index変換を明示すること、制御遅延をログで追跡できることを最低条件にする。
