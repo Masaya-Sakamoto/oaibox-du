@@ -289,6 +289,41 @@ int register_log_component(const char *name, const char *fext, int compidx);
 int logInit_log_mem(char*);
 void close_log_mem(void);
 
+/* Beam scheduling trace logger
+ *
+ * Records which beam each scheduler stage allocated during a slot.
+ * Usage:
+ *   beam_sched_trace_init(&trace, frame, slot)   -- at the start of the slot
+ *   beam_sched_trace_append(&trace, stage, beam, rnti) -- after each successful beam_allocation_procedure()
+ *   beam_sched_trace_flush(&trace)                -- after all schedulers have run
+ */
+typedef enum {
+  BEAM_SCHED_SIB1,
+  BEAM_SCHED_RA,
+  BEAM_SCHED_CSIRS,
+  BEAM_SCHED_CSI_MEAS,
+  BEAM_SCHED_SRS,
+  BEAM_SCHED_ULSCH,
+  BEAM_SCHED_DLSCH,
+  BEAM_SCHED_SR,
+  BEAM_SCHED_PUCCH,
+  BEAM_SCHED_NUM_STAGES
+} beam_sched_stage_t;
+
+#define BEAM_SCHED_TRACE_BUF_SIZE 2048
+
+typedef struct {
+  char buf[BEAM_SCHED_TRACE_BUF_SIZE];
+  int pos;
+  int frame;
+  int slot;
+  bool has_entry;
+} beam_sched_trace_t;
+
+void beam_sched_trace_init(beam_sched_trace_t *t, int frame, int slot);
+void beam_sched_trace_append(beam_sched_trace_t *t, beam_sched_stage_t stage, int beam_index, uint16_t rnti);
+void beam_sched_trace_flush(beam_sched_trace_t *t);
+
 /** @}*/
 
 /*!\fn int32_t write_file_matlab(const char *fname, const char *vname, void *data, int length, int dec, char format);

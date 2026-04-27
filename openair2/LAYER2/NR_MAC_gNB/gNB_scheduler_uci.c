@@ -339,6 +339,8 @@ void nr_csi_meas_reporting(int Mod_idP,frame_t frame, slot_t slot)
                                                          UE->UE_beam_index,
                                                          n_slots_frame);
         AssertFatal(beam.idx >= 0, "Cannot allocate CSI measurements on PUCCH in any available beam\n");
+        if (nrmac->beam_trace)
+          beam_sched_trace_append(nrmac->beam_trace, BEAM_SCHED_CSI_MEAS, beam.idx, UE->rnti);
         const int index = ul_buffer_index(sched_frame, sched_slot, n_slots_frame, nrmac->vrb_map_UL_size);
         uint16_t *vrb_map_UL = &nrmac->common_channels[0].vrb_map_UL[beam.idx][index * MAX_BWP_SIZE];
         // verify resources are free
@@ -1298,6 +1300,9 @@ int nr_acknack_scheduling(gNB_MAC_INST *mac,
       // blocking resources for current PUCCH in VRB map
       set_pucch0_vrb_occupation(curr_pucch, vrb_map_UL, bwp_start);
 
+      if (mac->beam_trace)
+        beam_sched_trace_append(mac->beam_trace, BEAM_SCHED_PUCCH, beam.idx, UE->rnti);
+
       return pucch_index; // index of current PUCCH structure
     }
   }
@@ -1405,6 +1410,8 @@ void nr_sr_reporting(gNB_MAC_INST *nrmac, frame_t SFN, slot_t slot)
         curr_pucch->r_pucch = -1;
         curr_pucch->active = true;
         set_pucch0_vrb_occupation(curr_pucch, vrb_map_UL, bwp_start);
+        if (nrmac->beam_trace)
+          beam_sched_trace_append(nrmac->beam_trace, BEAM_SCHED_SR, beam.idx, UE->rnti);
       }
     }
   }

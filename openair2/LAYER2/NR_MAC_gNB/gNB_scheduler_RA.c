@@ -1584,6 +1584,9 @@ static void nr_generate_Msg2(module_id_t module_idP,
         ra->timing_offset,
         distance_in_meters);
 
+  if (nr_mac->beam_trace)
+    beam_sched_trace_append(nr_mac->beam_trace, BEAM_SCHED_RA, beam.idx, ra->RA_rnti);
+
   // SCF222: PDU index incremented for each PDSCH PDU sent in TX control message. This is used to associate control
   // information to data and is reset every slot.
   const int pduindex = nr_mac->pdu_index[CC_id]++;
@@ -1957,6 +1960,9 @@ static void nr_generate_Msg4_MsgB(module_id_t module_idP,
                     harq->round,
                     tb_scaling,
                     pduindex);
+
+    if (nr_mac->beam_trace)
+      beam_sched_trace_append(nr_mac->beam_trace, BEAM_SCHED_RA, beam.idx, UE->rnti);
 
     // Reset TPC to 0 dB to not request new gain multiple times before computing new value for SNR
     sched_ctrl->tpc1 = 1;

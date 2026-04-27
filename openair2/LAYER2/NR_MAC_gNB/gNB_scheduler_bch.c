@@ -652,6 +652,8 @@ void schedule_nr_sib1(module_id_t module_idP,
       }
       int tb_size = gNB_mac->sib1_pdsch[i].tb_size;
       AssertFatal(res && tb_size > 0, "Couldn't allocate TB for SIB1 for an already allocated TDA\n");
+      if (gNB_mac->beam_trace)
+        beam_sched_trace_append(gNB_mac->beam_trace, BEAM_SCHED_SIB1, beam_sib.idx, 0);
       nfapi_nr_dl_tti_request_body_t *dl_req = &DL_req->dl_tti_request_body;
       int pdu_index = gNB_mac->pdu_index[0]++;
       nr_fill_nfapi_dl_SIB_pdu(gNB_mac,

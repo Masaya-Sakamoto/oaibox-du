@@ -1058,6 +1058,75 @@ void close_log_mem(void){
   }
  }
 
+/*
+ * Beam scheduling trace logger implementation.
+ *
+ * Each slot, gNB_dlsch_ulsch_scheduler() creates a beam_sched_trace_t on the
+ * stack, calls beam_sched_trace_init(), then each sub-scheduler appends via
+ * beam_sched_trace_append().  After all schedulers have run, beam_sched_trace_flush()
+ * outputs a single summary line at LOG_A (ANALYSIS) level.
+ */
+static const char *const beam_sched_stage_names[BEAM_SCHED_NUM_STAGES] = {
+  "SIB1", "RA", "CSI-RS", "CSI-Meas", "SRS", "ULSCH", "DLSCH", "SR", "PUCCH"
+};
+
+/* Track which stage was last appended so we can group entries with commas */
+static __thread beam_sched_stage_t beam_trace_last_stage = BEAM_SCHED_NUM_STAGES;
+
+void beam_sched_trace_init(beam_sched_trace_t *t, int frame, int slot)
+{
+  t->frame = frame;
+  t->slot = slot;
+  t->has_entry = false;
+  t->pos = snprintf(t->buf, BEAM_SCHED_TRACE_BUF_SIZE, "[BeamTrace] %d.%d |", frame, slot);
+  beam_trace_last_stage = BEAM_SCHED_NUM_STAGES;
+}
+
+void beam_sched_trace_append(beam_sched_trace_t *t, beam_sched_stage_t stage, int beam_index, uint16_t rnti)
+{
+  if (!t || t->pos >= BEAM_SCHED_TRACE_BUF_SIZE - 32)
+    return;
+
+  int remaining = BEAM_SCHED_TRACE_BUF_SIZE - t->pos;
+  int n;
+
+  if (beam_trace_last_stage == stage) {
+    /* Same stage as previous append — separate with comma */
+    if (rnti != 0)
+      n = snprintf(t->buf + t->pos, remaining, ",b%d(%04x)", beam_index, rnti);
+    else
+      n = snprintf(t->buf + t->pos, remaining, ",b%d", beam_index);
+  } else {
+    /* New stage — close previous stage separator and open new one */
+    if (rnti != 0)
+      n = snprintf(t->buf + t->pos, remaining, " %s:b%d(%04x)", beam_sched_stage_names[stage], beam_index, rnti);
+    else
+      n = snprintf(t->buf + t->pos, remaining, " %s:b%d", beam_sched_stage_names[stage], beam_index);
+  }
+
+  if (n > 0 && n < remaining)
+    t->pos += n;
+
+  beam_trace_last_stage = stage;
+  t->has_entry = true;
+}
+
+void beam_sched_trace_flush(beam_sched_trace_t *t)
+{
+  if (!t || !t->has_entry)
+    return;
+
+  /* Append closing separator and newline */
+  int remaining = BEAM_SCHED_TRACE_BUF_SIZE - t->pos;
+  if (remaining > 3) {
+    t->buf[t->pos++] = ' ';
+    t->buf[t->pos++] = '|';
+    t->buf[t->pos] = '\0';
+  }
+
+  LOG_A(NR_MAC, "%s\n", t->buf);
+}
+
 #ifdef LOG_TEST
 
 int main(int argc, char *argv[]) {

@@ -159,6 +159,15 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   int slots_frame = gNB->frame_structure.numb_slots_frame;
   clear_beam_information(&gNB->beam_info, frame, slot, slots_frame);
 
+  /* Per-slot beam scheduling trace: init on stack and expose via gNB pointer */
+  beam_sched_trace_t beam_trace;
+  if (gNB->beam_info.beam_mode != NO_BEAM_MODE) {
+    beam_sched_trace_init(&beam_trace, frame, slot);
+    gNB->beam_trace = &beam_trace;
+  } else {
+    gNB->beam_trace = NULL;
+  }
+
   gNB->frame = frame;
   gNB->slot = slot;
   start_meas(&gNB->gNB_scheduler);
@@ -256,6 +265,12 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   nr_sr_reporting(gNB, frame, slot);
 
   nr_schedule_pucch(gNB, frame, slot);
+
+  /* Flush beam scheduling trace after all schedulers have run */
+  if (gNB->beam_trace) {
+    beam_sched_trace_flush(gNB->beam_trace);
+    gNB->beam_trace = NULL;
+  }
 
   /* TODO: we copy from gNB->UL_tti_req_ahead[0][current_index], ie. CC_id == 0,
    * is more than 1 CC supported?

@@ -3446,6 +3446,8 @@ void nr_csirs_scheduling(int Mod_idP, frame_t frame, slot_t slot, nfapi_nr_dl_tt
                                                                UE->UE_beam_index,
                                                                n_slots_frame);
           AssertFatal(beam_csi.idx >= 0, "Cannot allocate CSI-RS in any available beam\n");
+          if (gNB_mac->beam_trace)
+            beam_sched_trace_append(gNB_mac->beam_trace, BEAM_SCHED_CSIRS, beam_csi.idx, 0);
           uint16_t *vrb_map = gNB_mac->common_channels[CC_id].vrb_map[beam_csi.idx];
           for (int rb = csirs_pdu_rel15->start_rb; rb < (csirs_pdu_rel15->start_rb + csirs_pdu_rel15->nr_of_rbs); rb++)
             vrb_map[rb] |= SL_to_bitmap(csirs_pdu_rel15->symb_l0, n_symb_l0);

@@ -2085,6 +2085,8 @@ static int  pf_ul(gNB_MAC_INST *nrmac,
       /* reduce max_num_ue once we are sure UE can be allocated, i.e., has CCE */
       remainUEs[ret.beam_idx]--;
       n_rb_sched[ret.beam_idx] -= ret.rbsize;
+      if (nrmac->beam_trace)
+        beam_sched_trace_append(nrmac->beam_trace, BEAM_SCHED_ULSCH, ret.beam_idx, UE->rnti);
       scheduled_something = true;
       continue;
     }
@@ -2372,6 +2374,8 @@ static int  pf_ul(gNB_MAC_INST *nrmac,
 
     /* reduce max_num_ue once we are sure UE can be allocated, i.e., has CCE */
     remainUEs[beam.idx]--;
+    if (nrmac->beam_trace)
+      beam_sched_trace_append(nrmac->beam_trace, BEAM_SCHED_ULSCH, beam.idx, iterator->UE->rnti);
     iterator++;
     scheduled_something = true;
   }

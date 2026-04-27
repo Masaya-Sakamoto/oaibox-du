@@ -975,6 +975,8 @@ typedef struct gNB_MAC_INST_s {
 
   NR_beam_info_t beam_info;
   antenna_control_if_t *antenna_ctrl;
+  /// Per-slot beam scheduling trace buffer (set by gNB_dlsch_ulsch_scheduler, read by sub-schedulers)
+  beam_sched_trace_t *beam_trace;
 
   /// maximum number of slots before a UE will be scheduled ULSCH automatically
   uint32_t ulsch_max_frame_inactivity;

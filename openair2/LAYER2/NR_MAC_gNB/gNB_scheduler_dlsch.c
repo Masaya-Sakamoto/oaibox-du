@@ -769,6 +769,8 @@ static void pf_dl(gNB_MAC_INST *mac,
       /* reduce max_num_ue once we are sure UE can be allocated, i.e., has CCE */
       remainUEs[ret.beam_idx]--;
       n_rb_sched[ret.beam_idx] -= ret.rbsize;
+      if (mac->beam_trace)
+        beam_sched_trace_append(mac->beam_trace, BEAM_SCHED_DLSCH, ret.beam_idx, UE->rnti);
 
     } else {
       /* skip this UE if there are no free HARQ processes. This can happen e.g.
@@ -1030,6 +1032,8 @@ static void pf_dl(gNB_MAC_INST *mac,
       rballoc_mask[rb + sched_pdsch.rbStart] |= slbitmap;
 
     remainUEs[beam.idx]--;
+    if (mac->beam_trace)
+      beam_sched_trace_append(mac->beam_trace, BEAM_SCHED_DLSCH, beam.idx, iterator->UE->rnti);
     iterator++;
   }
 }
