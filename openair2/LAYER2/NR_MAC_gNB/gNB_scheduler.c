@@ -48,6 +48,8 @@
 #include "nfapi/oai_integration/vendor_ext.h"
 #include "executables/nr-softmodem.h"
 
+#include "beam_spi_schedule.h"
+
 #include <errno.h>
 #include <string.h>
 
@@ -271,6 +273,9 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
     beam_sched_trace_flush(gNB->beam_trace);
     gNB->beam_trace = NULL;
   }
+
+  /* Extract beam schedule and enqueue SPI batch for USRP+BBox */
+  beam_spi_schedule_slot(gNB, frame, slot);
 
   /* TODO: we copy from gNB->UL_tti_req_ahead[0][current_index], ie. CC_id == 0,
    * is more than 1 CC supported?

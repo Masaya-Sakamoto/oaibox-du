@@ -129,8 +129,9 @@ if (OAI_TMYTEK_UD_BBOX OR OAI_TMYTEK_AIP)
           ${CMAKE_BINARY_DIR}/tlk_core_log
   )
 
-  add_library(oai_usrpdevif MODULE usrp_lib.cpp)
+  add_library(oai_usrpdevif MODULE usrp_lib.cpp beam_spi/beam_spi_worker.cpp)
   #target_include_directories(oai_usrpdevif PRIVATE Boost::boost)
+  target_include_directories(oai_usrpdevif PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/beam_spi)
   target_link_libraries(oai_usrpdevif PRIVATE ${UHD_LIBRARIES})
   target_link_libraries(oai_usrpdevif PRIVATE ${UHD_INCLUDE_DIRS})
   target_link_libraries(oai_usrpdevif PRIVATE usrp_fbs tlkcore_lib)

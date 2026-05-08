@@ -1290,6 +1290,7 @@ set (MAC_NR_SRC
   ${NR_PHY_INTERFACE_DIR}/NR_IF_Module.c
   ${NR_GNB_MAC_DIR}/main.c
   ${NR_GNB_MAC_DIR}/beam_antenna_control.c
+  ${NR_GNB_MAC_DIR}/beam_spi_schedule.c
   ${NR_GNB_MAC_DIR}/config.c
   ${NR_GNB_MAC_DIR}/gNB_scheduler.c
   ${NR_GNB_MAC_DIR}/gNB_scheduler_bch.c

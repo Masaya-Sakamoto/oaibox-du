@@ -119,6 +119,8 @@ int fpga_control(tlkcore_lib::tlkcore_ptr service, usrp_state_t *s);
 
 double center_freq = 0;
 double if_freq = 0;
+
+#include "beam_spi/beam_spi_worker.h"
 #endif
 
 //void print_notes(void)
@@ -366,6 +368,16 @@ static int trx_usrp_start(openair0_device_t *device)
       update_beam_config(ptr);
 #endif
       fpga_control(ptr, s);
+
+      /* Start beam SPI worker thread for symbol-level beam switching.
+       * Derive slots_per_frame from sample_rate: FR2 μ=3 → 80 slots/frame.
+       * symbols_per_slot = 14 (normal CP). */
+      {
+        int slots_per_frame = 80;  /* FR2 120kHz SCS: 10 subframes × 8 slots */
+        int symbols_per_slot = 14;
+        beam_spi_thread_start(&s->usrp, s->sample_rate,
+                              slots_per_frame, symbols_per_slot);
+      }
 #endif
       break;
     }
@@ -438,6 +450,12 @@ static void trx_usrp_end(openair0_device_t *device)
   usrp_state_t *s = (usrp_state_t *)device->priv;
 
   AssertFatal(s != NULL, "%s() called on uninitialized USRP\n", __func__);
+
+#if defined(ENABLE_TMYTEK_UD_BBOX) || defined(ENABLE_TMYTEK_AIP)
+  /* Stop beam SPI worker thread before releasing USRP */
+  beam_spi_thread_stop();
+#endif
+
   iqrecorder_end(device);
 
   LOG_I(HW, "releasing USRP\n");
