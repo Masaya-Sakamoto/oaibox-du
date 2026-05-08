@@ -1,14 +1,15 @@
 /*
  * beam_spi_task.h — Data structures for symbol-level beam SPI scheduling
  *
- * Producer (MAC scheduler) generates a batch of beam switch entries per slot.
- * Consumer (SPI worker thread) validates timing and executes timed SPI commands.
+ * Shared between MAC layer (producer) and USRP layer (consumer).
+ * Placed in radio/COMMON so both layers can include it without cross-dependency.
  */
 
 #ifndef BEAM_SPI_TASK_H
 #define BEAM_SPI_TASK_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +39,13 @@ typedef struct {
 
 /* Queue capacity — number of slot batches that can be buffered */
 #define BEAM_SPI_QUEUE_CAPACITY 64
+
+/*
+ * Callback type for enqueuing a batch into the SPI worker.
+ * Returns true on success, false if queue full (caller must free batch).
+ * The batch is heap-allocated; ownership transfers to the callee on success.
+ */
+typedef bool (*beam_spi_enqueue_fn_t)(beam_spi_slot_batch_t *batch);
 
 #ifdef __cplusplus
 }
