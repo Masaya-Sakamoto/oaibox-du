@@ -1092,15 +1092,18 @@ static DRB_nGRAN_to_mod_t get_e1_drb_mod_reestablishment(const drb_t *drb, const
   return drb_e1;
 }
 
-/**
- * @brief Notify E1 re-establishment to CU-UP
- */
+/** @brief Re-establish DRB PDCP on CU-UP (TS 38.331 clause 5.3.5.6.5, TS 38.463 bearer mod).
+ * Sends pDCP_Reestablishment and updated KUP keys after KgNB derivation. */
 static void cuup_notify_reestablishment(gNB_RRC_INST *rrc, gNB_RRC_UE_t *ue_p)
 {
   // Quit if no CU-UP is associated
   if (!is_cuup_associated(rrc) || !ue_associated_to_cuup(ue_p)) {
     return;
   }
+
+  /* TS 38.331 §5.3.5.6.5: no DRB/PDU session (e.g. after release) means nothing to do. */
+  if (seq_arr_size(&ue_p->drbs) == 0)
+    return;
 
   e1ap_bearer_mod_req_t req = {
       .gNB_cu_cp_ue_id = ue_p->rrc_ue_id,
