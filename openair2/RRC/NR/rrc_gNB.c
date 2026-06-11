@@ -1488,6 +1488,8 @@ static void rrc_handle_RRCReestablishmentRequest(gNB_RRC_INST *rrc,
     return;
   }
 
+  /* TS 38.331 §5.3.7.1: retrieve UE context (C-RNTI + physCellId): if it cannot be
+   * retrieved, respond with RRCSetup (Fig. 5.3.7.1-2). */
   ue_context_p = rrc_gNB_get_ue_context_by_rnti(rrc, assoc_id, old_rnti);
   if (ue_context_p == NULL) {
     // Fallback 1: Try to find UE by RNTI only (re-establishment on different DU scenario)
