@@ -2147,7 +2147,7 @@ static void rrc_ue_generate_RRCSetupComplete(NR_UE_RRC_INST_t *rrc, const uint8_
 static void nr_rrc_rrcsetup_fallback(NR_UE_RRC_INST_t *rrc)
 {
   LOG_W(NR_RRC,
-        "[UE %ld] Recived RRCSetup in response to %s request\n",
+        "[UE %ld] Received RRCSetup in response to %s request\n",
         rrc->ue_id, rrc->ra_trigger == RRC_CONNECTION_REESTABLISHMENT ? "RRCReestablishment" : "RRCResume");
 
   // discard any stored UE Inactive AS context and suspendConfig
