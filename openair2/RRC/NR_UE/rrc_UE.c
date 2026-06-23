@@ -2159,8 +2159,15 @@ static void nr_rrc_rrcsetup_fallback(NR_UE_RRC_INST_t *rrc)
   memset(rrc->kgnb, 0, sizeof(rrc->kgnb));
   rrc->as_security_activated = false;
 
+  // release the RRC configuration except for the default L1 parameter values,
+  // default MAC Cell Group configuration and CCCH configuration
+  nr_mac_rrc_message_t rrc_msg = {0};
+  rrc_msg.payload_type = NR_MAC_RRC_CONFIG_RESET;
+  rrc_msg.payload.config_reset.cause = RRC_SETUP_REESTAB_RESUME;
+  nr_rrc_send_msg_to_mac(rrc, &rrc_msg);
+
   // release radio resources for all established RBs except SRB0,
-  // including release of the RLC entities, of the associated PDCP entities and of SDAP
+  // including release of the associated PDCP entities and of SDAP
   for (int i = 1; i <= MAX_DRBS_PER_UE; i++) {
     if (get_DRB_status(rrc, i) != RB_NOT_PRESENT) {
       set_DRB_status(rrc, i, RB_NOT_PRESENT);
@@ -2177,15 +2184,6 @@ static void nr_rrc_rrcsetup_fallback(NR_UE_RRC_INST_t *rrc)
     nr_rrc_release_rlc_entity(rrc, i);
   }
   nr_sdap_delete_ue_entities(rrc->ue_id);
-
-  // release the RRC configuration except for the default L1 parameter values,
-  // default MAC Cell Group configuration and CCCH configuration
-  // TODO to be completed
-  NR_UE_MAC_reset_cause_t cause = RRC_SETUP_REESTAB_RESUME;
-  nr_mac_rrc_message_t rrc_msg = {0};
-  rrc_msg.payload_type = NR_MAC_RRC_CONFIG_RESET;
-  rrc_msg.payload.config_reset.cause = cause;
-  nr_rrc_send_msg_to_mac(rrc, &rrc_msg);
 
   // indicate to upper layers fallback of the RRC connection
   // TODO
