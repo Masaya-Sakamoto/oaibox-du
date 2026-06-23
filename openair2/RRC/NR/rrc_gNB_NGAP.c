@@ -222,9 +222,10 @@ void rrc_gNB_send_NGAP_NAS_FIRST_REQ(gNB_RRC_INST *rrc, gNB_RRC_UE_t *UE, NR_RRC
   req->gNB_ue_ngap_id = UE->rrc_ue_id;
 
   // RRC Establishment Cause
-  /* Assume that cause is coded in the same way in RRC and NGap, just check that the value is in NGap range */
-  AssertFatal(UE->establishment_cause < NGAP_RRC_CAUSE_LAST, "Establishment cause invalid (%jd/%d)!", UE->establishment_cause, NGAP_RRC_CAUSE_LAST);
-  req->establishment_cause = UE->establishment_cause;
+  if (UE->establishment_cause <= NGAP_RRC_CAUSE_MCS_PRIORITY_ACCESS)
+    req->establishment_cause = UE->establishment_cause;
+  else
+    req->establishment_cause = NGAP_RRC_CAUSE_NOTAVAILABLE;
 
   // NAS-PDU
   req->nas_pdu = create_byte_array(rrcSetupComplete->dedicatedNAS_Message.size, rrcSetupComplete->dedicatedNAS_Message.buf);
