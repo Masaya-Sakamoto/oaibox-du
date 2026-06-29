@@ -147,8 +147,9 @@ install_usrp_uhd_driver_from_source(){
             ret=$?;[[ $ret -ne 0 ]] && echo_fatal "Could not apply the TDD patch"
         elif [[ "$UHD_VERSION" == "4.10.0.0" || "$UHD_VERSION" == "4.9.0.0" || "$UHD_VERSION" == "4.8.0.0" || "$UHD_VERSION" == "4.7.0.0" || "$UHD_VERSION" == "4.6.0.0" || "$UHD_VERSION" == "4.5.0.0" ]]; then
             # Tested patch for versions listed in elif clause
-            git apply $OPENAIR_DIR/cmake_targets/tools/uhd-4.5plus-tdd-patch.diff
-            ret=$?;[[ $ret -ne 0 ]] && echo_fatal "Could not apply the TDD patch"
+            # git apply $OPENAIR_DIR/cmake_targets/tools/uhd-4.5plus-tdd-patch.diff
+            # ret=$?;[[ $ret -ne 0 ]] && echo_fatal "Could not apply the TDD patch"
+            :
         else
             # Tested that patch for the following versions:
             # - 4.0.0.0
@@ -459,6 +460,7 @@ check_install_oai_software() {
 
     install_asn1c_from_source $1
     install_simde_from_source $1
+    install_blis_from_source $1
 }
 
 install_asn1c_from_source(){
@@ -501,6 +503,55 @@ install_simde_from_source(){
     git log -n1
     # brute force copy into /usr/include
     $SUDO \cp -rv ../simde /usr/include
+}
+
+install_blis_from_source(){
+    # Source-build BLIS with an explicit multi-config so the resulting
+    # libblis-mt.so does runtime kernel dispatch based on the container host
+    # CPU. Upstream "auto" and the Ubuntu apt package are both pinned to a
+    # single sub-config (AMD's build pins to the build host's CPU; Ubuntu's
+    # aarch64 package is hard-pinned to cortexa57), which causes
+    # "Default NC is non-multiple of NR" aborts at first GEMM on any
+    # non-matching CPU (e.g., NVIDIA GB10 / Cortex-X925).
+    echo_info "\nInstalling BLIS from source (portable multi-config build)."
+    $SUDO $INSTALLER -y install build-essential make g++ gfortran cmake
+    $SUDO rm -rf /tmp/blis
+
+    local blis_arch=$(uname -m)
+    local blis_config
+    case "$blis_arch" in
+        x86_64)           blis_config="x86_64" ;;
+        aarch64|arm64)    blis_config="arm64"  ;;
+        *) echo_fatal "install_blis_from_source: unsupported arch '$blis_arch'" ;;
+    esac
+
+    # AMD's fork carries both x86_64 and arm64 multi-config registries and
+    # is kept in sync with upstream flame/blis.
+    git clone --depth 1 https://github.com/amd/blis.git /tmp/blis
+    cd /tmp/blis
+    ./configure --enable-cblas -t openmp "$blis_config"
+    make -j`nproc`
+    # make check
+    $SUDO make install
+    $SUDO ldconfig
+
+    # Fail fast if the multi-threaded library did not land where expected;
+    # the Dockerfile runtime stage copies it from /usr/local/lib.
+    ls /usr/local/lib/libblis-mt.so* > /dev/null \
+        || echo_fatal "install_blis_from_source: libblis-mt.so not found in /usr/local/lib"
+
+    $SUDO cp /usr/local/share/pkgconfig/blis-mt.pc /usr/local/share/pkgconfig/cblis.pc
+    $SUDO ln -sf /usr/local/share/pkgconfig/blis-mt.pc /usr/local/share/pkgconfig/blis.pc
+
+    # OAI sources do `#include <cblas.h>` / `#include <blis.h>` without
+    # adding ${blis_INCLUDE_DIRS} to every target, so the headers must be
+    # reachable at a standard include path. Ubuntu's libblis-dev does this
+    # via update-alternatives; replicate it for the source build.
+    $SUDO ln -sf /usr/local/include/blis/cblas.h /usr/local/include/cblas.h
+    $SUDO ln -sf /usr/local/include/blis/blis.h  /usr/local/include/blis.h
+
+    grep -qxF 'export BLIS_NUM_THREADS=6' ~/.bashrc || echo 'export BLIS_NUM_THREADS=6' >> ~/.bashrc
+    source ~/.bashrc
 }
 
 install_lttng() {

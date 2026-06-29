@@ -929,6 +929,9 @@ struct nr_dl_candidate {
   uint64_t fiveQI; ///< 5QI from first DRB's QoS config (0 if none)
   int priority; ///< LC priority from first DRB (lower = higher priority, 0 if none)
   nssai_t nssai; ///< slice/service type/differentiator from first DRB
+  uint16_t slice_start;
+  uint16_t slice_size;
+  bool slice_active;
 
   bool skipped; ///< true if dropped by TDA/beam select (skip in downstream stages)
   bool scheduled; ///< true if accepted by the RB-allocation policy
@@ -1049,6 +1052,9 @@ struct nr_ul_candidate {
   uint64_t fiveQI; ///< 5QI from first DRB's QoS config (0 if none)
   int priority; ///< LC priority from first DRB (0 if none)
   nssai_t nssai; ///< slice/service type/differentiator from first DRB
+  uint16_t slice_start;
+  uint16_t slice_size;
+  bool slice_active;
   int beam_index;
 
   /* ── Power control (set by collect, read-only after) ─────────────────────── */
@@ -1164,6 +1170,13 @@ typedef struct NR_du_stats {
   uint32_t pusch_mcs_dist[8][2][32];
 } NR_du_stats_t;
 
+typedef struct nssai_config_t {
+  uint8_t sst;
+  uint32_t sd;
+  uint16_t prb_start;
+  uint16_t num_prbs;
+} nssai_config_t;
+
 /*! \brief top level eNB MAC structure */
 typedef struct gNB_MAC_INST_s {
   /// Ethernet parameters for northbound midhaul interface
@@ -1277,6 +1290,9 @@ typedef struct gNB_MAC_INST_s {
   nr_mac_rrc_ul_if_t mac_rrc;
   f1_config_t f1_config;
   int16_t frame;
+  int16_t slot;
+  seq_arr_t nssai_config_dl;
+  seq_arr_t nssai_config_ul;
 
   /// number of UEs to exceed to disable stats
   int stats_max_ue;

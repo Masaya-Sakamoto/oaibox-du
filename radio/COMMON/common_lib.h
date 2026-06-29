@@ -142,6 +142,7 @@ typedef enum {
   RU_GPIO_CONTROL_NONE,
   RU_GPIO_CONTROL_GENERIC,
   RU_GPIO_CONTROL_INTERDIGITAL,
+  RU_GPIO_CONTROL_TMYTEK
 } gpio_control_t;
 
 /*! \brief defines the direction of each symbol. Int values intentional and
@@ -514,6 +515,8 @@ struct openair0_device {
    */
   int (*trx_read_func2)(openair0_device_t *device, openair0_timestamp_t *ptimestamp, uint32_t **buff, int nsamps);
 
+  int (*beam_switching)(int rx_beam_id, int tx_beam_id);
+
   /*! \brief print the device statistics
    * \param device the hardware to use
    * \returns  0 on success
@@ -676,6 +679,7 @@ extern void iqrecorder_end(openair0_device_t *device);
 
 int openair0_write_reorder(openair0_device_t *device, openair0_timestamp_t timestamp, void **txp, int nsamps, int nbAnt, int flags);
 void openair0_write_reorder_clear_context(openair0_device_t *device);
+int extract_sdr_param(const char *sdr_addrs, const char *key, char *output_buffer, size_t buffer_size);
 /**@}*/
 
 #ifdef __cplusplus

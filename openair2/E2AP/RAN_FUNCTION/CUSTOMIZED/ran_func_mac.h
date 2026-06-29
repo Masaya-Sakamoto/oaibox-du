@@ -5,10 +5,12 @@
 #ifndef SM_MAC_READ_WRITE_AGENT_H
 #define SM_MAC_READ_WRITE_AGENT_H
 
-#include "openair2/E2AP/flexric/src/agent/../sm/sm_io.h"
+#include "sm/sm_io.h"
 #include "common/ran_context.h"
 #include "openair2/LAYER2/NR_MAC_gNB/mac_proto.h"
-#include "openair2/E2AP/flexric/src/util/time_now_us.h"
+#include "util/time_now_us.h"
+#include "openair2/RRC/NR/nr_rrc_proto.h"
+#include "openair1/PHY/defs_RU.h"
 
 
 bool read_mac_sm(void*);

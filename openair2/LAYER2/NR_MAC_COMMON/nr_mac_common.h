@@ -76,6 +76,12 @@ typedef struct {
   uint16_t bwpSize;
 } bwp_info_t;
 
+typedef struct {
+  uint16_t prb_start;
+  uint16_t num_prbs;
+  bool slice_active;
+} nssai_bwp_info_t;
+
 uint32_t get_Y(const NR_SearchSpace_t *ss, int slot, rnti_t rnti);
 
 uint8_t get_BG(uint32_t A, uint16_t R);

@@ -5,7 +5,7 @@
 #ifndef RAN_E2SM_UE_ID_H
 #define RAN_E2SM_UE_ID_H
 
-#include "openair2/E2AP/flexric/src/agent/../sm/sm_io.h"
+#include "sm/sm_io.h"
 #include "openair2/RRC/NR/rrc_gNB_UE_context.h"
 
 ue_id_e2sm_t fill_e2sm_gnb_ue_id_data(const gNB_RRC_UE_t *rrc_ue_context, const uint32_t rrc_ue_id, const ue_id_t cucp_ue_id);

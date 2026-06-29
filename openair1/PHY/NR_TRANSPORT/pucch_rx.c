@@ -1528,11 +1528,7 @@ void nr_decode_pucch2(PHY_VARS_gNB *gNB,
   uci_pdu->pucch_format = 0;
   uci_pdu->ul_cqi = cqi;
   uci_pdu->timing_advance = 0xffff; // currently not valid
-  uci_pdu->rssi =
-      1280
-      - (10 * dB_fixed(32767 * 32767)
-         - dB_fixed_times10(signal_energy_nodc(&rxdataF[0][soffset + (l2 * frame_parms->ofdm_symbol_size) + re_offset[0]],
-                                               12 * pucch_pdu->prb_size)));
+  uci_pdu->rssi = 1280 - 10 * (dB_fixed(32767 * 32767) - pucch2_levdB);
   if (pucch_pdu->bit_len_harq > 0) {
     int harq_bytes = pucch_pdu->bit_len_harq >> 3;
     if ((pucch_pdu->bit_len_harq & 7) > 0)

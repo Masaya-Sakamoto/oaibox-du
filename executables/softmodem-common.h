@@ -49,6 +49,13 @@ extern "C"
 #define CONFIG_HLP_CHESTTIME     "Set channel estimation type in time domain. 0-Symbols take estimates of the last preceding DMRS symbol (default). 1-Symbol based averaging of channel estimates in time. \n"
 #define CONFIG_HLP_IMSCOPE       "Enable phy scope based on imgui and implot"
 #define CONFIG_HLP_IMSCOPE_RECORD "Enable recording scope data to filesystem"
+#define CONFIG_HLP_EXPORT_MOD_SYMBOLS "Export uplink modulated symbols"
+#define CONFIG_HLP_EXPORT_MOD_SYMBOLS_IP   "Destination IP address for uplink modulated symbols export (default: 127.0.0.1)"
+#define CONFIG_HLP_EXPORT_MOD_SYMBOLS_PORT "Destination UDP port for uplink modulated symbols export (default: 63138)"
+#define CONFIG_HLP_EXPORT_SRS_CHANNEL "Export SRS estimated channel"
+#define CONFIG_HLP_EXPORT_SRS_CHANNEL_IP   "Destination IP address for SRS channel export (default: 127.0.0.1)"
+#define CONFIG_HLP_EXPORT_SRS_CHANNEL_PORT "Destination UDP port for SRS channel export (default: 63139)"
+#define CONFIG_HLP_EXPORT_SRS_ISAC "Export SRS estimated channel for ISAC management"
 
 #define CONFIG_HLP_NONSTOP       "Go back to frame sync mode after 100 consecutive PBCH failures\n"
 
@@ -81,7 +88,7 @@ extern "C"
 /*                                            command line parameters common to eNodeB and UE                                                          */
 /*   optname                 helpstr                  paramflags      XXXptr                              defXXXval              type         numelt   */
 /*-----------------------------------------------------------------------------------------------------------------------------------------------------*/
-#define RF_CONFIG_FILE      softmodem_params.rf_config_file
+#define RF_CONFIG_FILE           softmodem_params.rf_config_file
 #define TP_CONFIG           softmodem_params.threadPoolConfig
 #define CONTINUOUS_TX       softmodem_params.continuous_tx
 #define PHY_TEST            softmodem_params.phy_test
@@ -102,12 +109,16 @@ extern "C"
 #define CONTINUOUS_TX       softmodem_params.continuous_tx
 #define SYNC_REF            softmodem_params.sync_ref
 #define DEFAULT_PDU_ID      softmodem_params.default_pdu_session_id
+#define EXPORT_MOD_SYMBOLS_IP    softmodem_params.export_mod_symbols_ip
+#define EXPORT_MOD_SYMBOLS_PORT  softmodem_params.export_mod_symbols_port
+#define EXPORT_SRS_CHANNEL_IP    softmodem_params.export_srs_channel_ip
+#define EXPORT_SRS_CHANNEL_PORT  softmodem_params.export_srs_channel_port
 
 extern int usrp_tx_thread;
 // clang-format off
 #define CMDLINE_PARAMS_DESC {  \
   {"rf-config-file",        CONFIG_HLP_RFCFGF,        0,              .strptr=&RF_CONFIG_FILE,                .defstrval=NULL,          TYPE_STRING, 0},  \
-  {"thread-pool",           CONFIG_HLP_TPOOL,         0,              .strptr=&TP_CONFIG,                     .defstrval="-1,-1,-1,-1,-1,-1,-1,-1",  TYPE_STRING, 0},     \
+  {"thread-pool",           CONFIG_HLP_TPOOL,         0,              .strptr=&TP_CONFIG,                     .defstrval="-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1",  TYPE_STRING, 0},     \
   {"phy-test",              CONFIG_HLP_PHYTST,        PARAMFLAG_BOOL, .iptr=&PHY_TEST,                        .defintval=0,             TYPE_INT,    0},  \
   {"do-ra",                 CONFIG_HLP_DORA,          PARAMFLAG_BOOL, .iptr=&DO_RA,                           .defintval=0,             TYPE_INT,    0},  \
   {"sl-mode",               CONFIG_HLP_SL_MODE,       0,              .u8ptr=&SL_MODE,                        .defintval=0,             TYPE_UINT8,  0},  \
@@ -130,7 +141,7 @@ extern int usrp_tx_thread;
   {"chest-time",            CONFIG_HLP_CHESTTIME,     0,              .iptr=&CHEST_TIME,                      .defintval=0,             TYPE_INT,    0},  \
   {"nsa",                   CONFIG_HLP_NSA,           PARAMFLAG_BOOL, .iptr=&NSA,                             .defintval=0,             TYPE_INT,    0},  \
   {"node-number",           NULL,                     0,              .u16ptr=&NODE_NUMBER,                   .defuintval=0,            TYPE_UINT16, 0},  \
-  {"usrp-tx-thread-config", CONFIG_HLP_USRP_THREAD,   0,              .iptr=&usrp_tx_thread,                  .defstrval=0,             TYPE_INT,    0},  \
+  {"usrp-tx-thread-config", CONFIG_HLP_USRP_THREAD,   PARAMFLAG_BOOL, .iptr=&usrp_tx_thread,                  .defintval=1,             TYPE_INT,    0},  \
   {"nfapi",                 CONFIG_HLP_NFAPI,         0,              .strptr=NULL,                           .defstrval="MONOLITHIC",  TYPE_STRING, 0},  \
   {"non-stop",              CONFIG_HLP_NONSTOP,       PARAMFLAG_BOOL, .iptr=&NON_STOP,                        .defintval=0,             TYPE_INT,    0},  \
   {"continuous-tx",         CONFIG_HLP_CONTINUOUS_TX, PARAMFLAG_BOOL, .iptr=&CONTINUOUS_TX,                   .defintval=0,             TYPE_INT,    0},  \
@@ -142,6 +153,13 @@ extern int usrp_tx_thread;
   {"imscope" ,              CONFIG_HLP_IMSCOPE,       PARAMFLAG_BOOL, .uptr=&enable_imscope,                   .defintval=0,            TYPE_UINT,   0}, \
   {"imscope-record" ,       CONFIG_HLP_IMSCOPE_RECORD,PARAMFLAG_BOOL, .uptr=&enable_imscope_record,            .defintval=0,            TYPE_UINT,   0}, \
   {"default-pdu-id",        NULL,                     0,              .iptr=&DEFAULT_PDU_ID,                   .defintval=-1,           TYPE_INT,    0}, \
+  {"export-mod-symbols" ,      CONFIG_HLP_EXPORT_MOD_SYMBOLS,      PARAMFLAG_BOOL, .uptr=&export_mod_symbols,       .defintval=0,           TYPE_UINT,   0}, \
+  {"export-mod-symbols-ip" ,   CONFIG_HLP_EXPORT_MOD_SYMBOLS_IP,   0,              .strptr=&EXPORT_MOD_SYMBOLS_IP,  .defstrval="127.0.0.1", TYPE_STRING, 0}, \
+  {"export-mod-symbols-port" , CONFIG_HLP_EXPORT_MOD_SYMBOLS_PORT, 0,              .uptr=&EXPORT_MOD_SYMBOLS_PORT,  .defuintval=63138,      TYPE_UINT,   0}, \
+  {"export-srs-channel" ,      CONFIG_HLP_EXPORT_SRS_CHANNEL,      PARAMFLAG_BOOL, .uptr=&export_srs_channel,       .defintval=0,           TYPE_UINT,   0}, \
+  {"export-srs-channel-ip" ,   CONFIG_HLP_EXPORT_SRS_CHANNEL_IP,   0,              .strptr=&EXPORT_SRS_CHANNEL_IP,  .defstrval="127.0.0.1", TYPE_STRING, 0}, \
+  {"export-srs-channel-port" , CONFIG_HLP_EXPORT_SRS_CHANNEL_PORT, 0,              .uptr=&EXPORT_SRS_CHANNEL_PORT,  .defuintval=63139,      TYPE_UINT,   0}, \
+  {"export-srs-isac" ,         CONFIG_HLP_EXPORT_SRS_ISAC,         PARAMFLAG_BOOL, .uptr=&export_srs_isac,          .defintval=0,           TYPE_UINT,   0}, \
 }
 // clang-format on
 
@@ -176,6 +194,13 @@ extern int usrp_tx_thread;
                {"MONOLITHIC", "PNF", "VNF", "AERIAL","UE_STUB_PNF","UE_STUB_OFFNET","STANDALONE_PNF"}, \
                {NFAPI_MONOLITHIC, NFAPI_MODE_PNF, NFAPI_MODE_VNF, NFAPI_MODE_AERIAL,NFAPI_UE_STUB_PNF,NFAPI_UE_STUB_OFFNET,NFAPI_MODE_STANDALONE_PNF}, \
                7 } }, \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
@@ -241,6 +266,9 @@ extern int usrp_tx_thread;
 #define IS_SOFTMODEM_NOSTATS (get_softmodem_optmask()->bit.SOFTMODEM_NOSTATS_BIT)
 #define IS_SOFTMODEM_IMSCOPE_ENABLED (get_softmodem_optmask()->bit.SOFTMODEM_IMSCOPE_BIT)
 #define IS_SOFTMODEM_IMSCOPE_RECORD_ENABLED (get_softmodem_optmask()->bit.SOFTMODEM_IMSCOPE_RECORD_BIT)
+#define IS_SOFTMODEM_EXPORT_MOD_SYMBOLS_ENABLED (get_softmodem_optmask()->bit.SOFTMODEM_EXPORT_MOD_SYMBOLS_BIT)
+#define IS_SOFTMODEM_EXPORT_SRS_CHANNEL_ENABLED (get_softmodem_optmask()->bit.SOFTMODEM_EXPORT_SRS_CHANNEL_BIT)
+#define IS_SOFTMODEM_EXPORT_SRS_ISAC_ENABLED (get_softmodem_optmask()->bit.SOFTMODEM_EXPORT_SRS_ISAC_BIT)
 typedef struct optmask_s {
   union {
     struct {
@@ -261,6 +289,9 @@ typedef struct optmask_s {
       uint64_t SOFTMODEM_NOSTATS_BIT: 1;
       uint64_t SOFTMODEM_IMSCOPE_BIT: 1;
       uint64_t SOFTMODEM_IMSCOPE_RECORD_BIT : 1;
+      uint64_t SOFTMODEM_EXPORT_MOD_SYMBOLS_BIT : 1;
+      uint64_t SOFTMODEM_EXPORT_SRS_CHANNEL_BIT : 1;
+      uint64_t SOFTMODEM_EXPORT_SRS_ISAC_BIT : 1;
     } bit;
     uint64_t v; // allow to export entire bit set, force to 64 bit processor atomic size
   };
@@ -294,6 +325,10 @@ typedef struct {
   int threequarter_fs;
   int default_pdu_session_id;
   int extra_pdu_session_id;
+  char *export_mod_symbols_ip;
+  uint32_t export_mod_symbols_port;
+  char *export_srs_channel_ip;
+  uint32_t export_srs_channel_port;
 } softmodem_params_t;
 
 #define IS_SA_MODE(sM_params) (!(sM_params)->phy_test && !(sM_params)->do_ra && !(sM_params)->nsa)

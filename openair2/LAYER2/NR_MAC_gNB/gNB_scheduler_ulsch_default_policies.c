@@ -136,6 +136,21 @@ static int compare_ul_pf_ptrs(const void *a, const void *b)
   /* retx first (INFINITY weight), then highest PF weight */
   float wa = ca->is_retx ? INFINITY : ul_pf_weight(ca->current_mcs, ca->mcs_table, ca->sched_pusch.nrOfLayers, ca->avg_throughput);
   float wb = cb->is_retx ? INFINITY : ul_pf_weight(cb->current_mcs, cb->mcs_table, cb->sched_pusch.nrOfLayers, cb->avg_throughput);
+
+  // Apply NSSAI specific scheduling coefficients
+  NR_UE_sched_ctrl_t *sched_ctrl_a = &ca->UE->UE_sched_ctrl;
+  for (int i = 0; i < seq_arr_size(&sched_ctrl_a->lc_config); ++i) {
+    const nr_lc_config_t *c = seq_arr_at(&sched_ctrl_a->lc_config, i);
+    wa = wa * get_nssai_sched_coeff(c->nssai.sst);
+  }
+
+  // Apply NSSAI specific scheduling coefficients
+  NR_UE_sched_ctrl_t *sched_ctrl_b = &cb->UE->UE_sched_ctrl;
+  for (int i = 0; i < seq_arr_size(&sched_ctrl_b->lc_config); ++i) {
+    const nr_lc_config_t *c = seq_arr_at(&sched_ctrl_b->lc_config, i);
+    wb = wb * get_nssai_sched_coeff(c->nssai.sst);
+  }
+
   return (wa < wb) - (wa > wb);
 }
 
@@ -248,7 +263,13 @@ int nr_ul_proportional_fair(const nr_ul_sched_params_t *params, nr_ul_candidate_
 
     int rbStart;
     uint16_t *vrb_map = params->vrb_map_UL[cand->alloc_beam_idx];
-    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &rbStart);
+    int x_start = cand->slice_active ? cand->slice_start : cand->bwp_start;
+    int x_size = cand->slice_active ? cand->slice_size : cand->bwp_size;
+    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, x_start, x_size, &rbStart);
+    if (cand->slice_active) {
+      rbStart += cand->slice_start;
+    }
+
     if (block_len < cand->retx_rbSize)
       continue;
 
@@ -263,7 +284,12 @@ int nr_ul_proportional_fair(const nr_ul_sched_params_t *params, nr_ul_candidate_
 
     uint16_t *vrb_map = params->vrb_map_UL[cand->alloc_beam_idx];
     int rbStart;
-    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &rbStart);
+    int x_start = cand->slice_active ? cand->slice_start : cand->bwp_start;
+    int x_size = cand->slice_active ? cand->slice_size : cand->bwp_size;
+    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, x_start, x_size, &rbStart);
+    if (cand->slice_active) {
+      rbStart += cand->slice_start;
+    }
     if (block_len < min_rb)
       continue;
 
@@ -278,7 +304,12 @@ int nr_ul_proportional_fair(const nr_ul_sched_params_t *params, nr_ul_candidate_
 
     int block_start;
     uint16_t *vrb_map = params->vrb_map_UL[cand->alloc_beam_idx];
-    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &block_start);
+    int x_start = cand->slice_active ? cand->slice_start : cand->bwp_start;
+    int x_size = cand->slice_active ? cand->slice_size : cand->bwp_size;
+    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, x_start, x_size, &block_start);
+    if (cand->slice_active) {
+      block_start += cand->slice_start;
+    }
     if (block_len < min_rb)
       continue;
 

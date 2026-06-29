@@ -1,0 +1,164 @@
+Active_gNBs:
+  - gNB-OAI
+Asn1_verbosity: none
+continuous-tx: 0
+E: 0
+export-mod-symbols: 0
+export-srs-channel: 0
+thread-pool: -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+tune-offset: 0
+nfapi: "AERIAL"
+pdcp-drop: 1
+gNBs:
+  - gNB_ID: "0xe00"
+    gNB_name: gNB-OAI
+    maxMIMO_layers: 4
+    tracking_area_code: 1
+    plmn_list:
+      - mcc: "001"
+        mnc: "01"
+        mnc_length: 2
+        snssaiList:
+          - sst: "1"
+            sd: "0xFFFFFF"
+    nr_cellid: "12345678"
+    pdsch_AntennaPorts_XP: 2
+    pdsch_AntennaPorts_N1: 2
+    pdsch_AntennaPorts_N2: 1
+    pusch_AntennaPorts: 4
+    CSI_report_type: "ssb_rsrp"
+    do_CSIRS: 1
+    do_SRS: 1
+    do_TCI: 0
+    min_rxtxtime: 2
+    uess_agg_levels: [0, 4, 2, 1, 0]
+    ul_prbblacklist: ""
+    um_on_default_drb: 0
+    disable_harq: 0
+    servingCellConfigCommon:
+      - physCellId: 0
+        absoluteFrequencySSB: 627264
+        dl_frequencyBand: 78
+        dl_absoluteFrequencyPointA: 626736
+        dl_offstToCarrier: 0
+        dl_subcarrierSpacing: 1
+        dl_carrierBandwidth: 273
+        initialDLBWPlocationAndBandwidth: 1099
+        initialDLBWPsubcarrierSpacing: 1
+        initialDLBWPcontrolResourceSetZero: 10
+        initialDLBWPsearchSpaceZero: 0
+        ul_frequencyBand: 78
+        ul_absoluteFrequencyPointA: 626736
+        ul_offstToCarrier: 0
+        ul_subcarrierSpacing: 1
+        ul_carrierBandwidth: 273
+        pMax: 26
+        initialULBWPlocationAndBandwidth: 1099
+        initialULBWPsubcarrierSpacing: 1
+        prach_ConfigurationIndex: 148
+        prach_msg1_FDM: 0
+        prach_msg1_FrequencyStart: 0
+        zeroCorrelationZoneConfig: 12
+        preambleReceivedTargetPower: -96
+        preambleTransMax: 6
+        powerRampingStep: 1
+        ra_ResponseWindow: -1
+        ssb_perRACH_OccasionAndCB_PreamblesPerSSB_PR: 4
+        ssb_perRACH_OccasionAndCB_PreamblesPerSSB: 15
+        ra_ContentionResolutionTimer: 7
+        rsrp_ThresholdSSB: 19
+        prach_RootSequenceIndex_PR: 2
+        prach_RootSequenceIndex: 1
+        msg1_SubcarrierSpacing: 1
+        restrictedSetConfig: 0
+        msg3_DeltaPreamble: 1
+        p0_NominalWithGrant: -90
+        pucchGroupHopping: 0
+        hoppingId: 40
+        p0_nominal: -90
+        n_TimingAdvanceOffset: -1
+        dmrs_TypeA_Position: 0
+        subcarrierSpacing: 1
+        ssb_PositionsInBurst_Bitmap: 1
+        ssb_periodicityServingCell: 2
+        referenceSubcarrierSpacing: 1
+        dl_UL_TransmissionPeriodicity: 6
+        nrofDownlinkSlots: 6
+        nrofDownlinkSymbols: 10
+        nrofUplinkSlots: 3
+        nrofUplinkSymbols: 0
+        ssPBCH_BlockPower: -20
+    SCTP:
+      SCTP_INSTREAMS: 2
+      SCTP_OUTSTREAMS: 2
+    amf_ip_address:
+      - ipv4: 172.31.0.132
+    NETWORK_INTERFACES:
+      GNB_IPV4_ADDRESS_FOR_NG_AMF: 10.11.69.64
+      GNB_IPV4_ADDRESS_FOR_NGU: 10.11.69.64
+      GNB_PORT_FOR_S1U: "2152"
+    TIMERS:
+      n310: 20
+      n311: 1
+      t300: 400
+      t301: 400
+      t310: 2000
+      t311: 3000
+      t319: 400
+pdcp:
+  drb:
+    sn_size: "len18bits"
+    t_reordering: "ms1000"
+    discard_timer: "infinity"
+rlc:
+  srb:
+    t_poll_retransmit: "ms45"
+  drb_am:
+    pollByte: "infinity"
+    pollPDU: "p128"
+    t_poll_retransmit: "ms100"
+  drb_um:
+    sn_field_length: "size12"
+    t_reassembly: "ms15"
+MACRLCs:
+  - num_cc: 1
+    tr_s_preference: aerial
+    tr_s_shm_prefix: "nvipc"
+    tr_s_poll_core: 18
+    tr_n_preference: local_RRC
+    pucch_RSSI_Threshold: 0
+    pusch_RSSI_Threshold: 0
+    pucch_TargetSNRx10: 200
+    pusch_TargetSNRx10: 200
+    pusch_FailureThres: 100
+    ulsch_max_frame_inactivity: 10
+    dl_min_mcs: 0
+    dl_max_mcs: 28
+    ul_min_mcs: 0
+    ul_max_mcs: 28
+security:
+  ciphering_algorithms:
+    - nea0
+    - nea2
+    - nea1
+  integrity_algorithms:
+    - nia2
+    - nia1
+    - nia0
+  drb_ciphering: "yes"
+  drb_integrity: "no"
+log_config:
+  global_log_level: info
+  hw_log_level: info
+  phy_log_level: info
+  mac_log_level: info
+  rlc_log_level: info
+  pdcp_log_level: info
+  rrc_log_level: info
+  ngap_log_level: info
+  f1ap_log_level: info
+  gtpu_log_level: info
+e2_agent:
+  near_ric_ip_addr: 127.0.0.1
+  local_ip_addr: 127.0.0.1
+  sm_dir: /usr/local/lib/flexric/

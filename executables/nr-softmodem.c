@@ -16,7 +16,7 @@ unsigned short config_frames[4] = {2,9,11,13};
 #include "nfapi/oai_integration/aerial/fapi_nvIPC.h"
 #endif
 #ifdef E2_AGENT
-#include "openair2/E2AP/flexric/src/agent/e2_agent_api.h"
+#include "agent/e2_agent_api.h"
 #include "openair2/E2AP/RAN_FUNCTION/init_ran_func.h"
 #endif
 #include "nr-softmodem.h"
@@ -69,6 +69,12 @@ unsigned short config_frames[4] = {2,9,11,13};
 #include "x2ap_eNB.h"
 #include "openair1/SCHED_NR/sched_nr.h"
 #include "openair2/SDAP/nr_sdap/nr_sdap.h"
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+#define OAIBOX_DT_CHANNEL_EXPORT_ADDRESS "127.0.0.1"
+#define OAIBOX_DT_CHANNEL_EXPORT_PORT 63140
+#define MAX_UDP_SIZE 65536   // maximum UDP payload buffer
 
 RAN_CONTEXT_t RC;
 pthread_cond_t nfapi_sync_cond;
@@ -450,13 +456,16 @@ static void wait_nfapi_init()
 #ifdef E2_AGENT
 static void initialize_agent(ngran_node_t node_type, e2_agent_args_t oai_args)
 {
-  AssertFatal(oai_args.sm_dir != NULL , "Please, specify the directory where the SMs are located in the config file, i.e., add in config file the next line: e2_agent = {near_ric_ip_addr = \"127.0.0.1\"; sm_dir = \"/usr/local/lib/flexric/\");} ");
-  AssertFatal(oai_args.ip != NULL , "Please, specify the IP address of the nearRT-RIC in the config file, i.e., e2_agent = {near_ric_ip_addr = \"127.0.0.1\"; sm_dir = \"/usr/local/lib/flexric/\"");
+  const char* conf_example_msg = "i.e., add in config file the following line:  e2_agent = {near_ric_ip_addr = \"127.0.0.1\"; local_ip_addr = \"127.0.0.1\"; sm_dir = \"/usr/local/lib/flexric/\");} ";
+  AssertFatal(oai_args.sm_dir != NULL , "Please, specify the directory where the SMs are located in the config file, %s", conf_example_msg);
+  AssertFatal(oai_args.server_ip != NULL , "Please, specify the IP address of the nearRT-RIC in the config file, %s", conf_example_msg);
+  AssertFatal(oai_args.client_ip != NULL , "Please, specify the local IP address to connect ot the nearRT-RIC in the config file, %s", conf_example_msg);
 
-  printf("After RCconfig_NR_E2agent %s %s \n",oai_args.sm_dir, oai_args.ip  );
+  printf("After RCconfig_NR_E2agent %s %s %s\n",oai_args.sm_dir, oai_args.server_ip , oai_args.client_ip );
 
   fr_args_t args = {0};
-  memcpy(args.ip, oai_args.ip, FR_IP_ADDRESS_LEN);
+  memcpy(args.client_ip, oai_args.client_ip, FR_IP_ADDRESS_LEN);
+  memcpy(args.server_ip, oai_args.server_ip, FR_IP_ADDRESS_LEN);
   memcpy(args.libs_dir, oai_args.sm_dir, FR_CONF_FILE_LEN);
 
   sleep(1);
@@ -487,7 +496,7 @@ static void initialize_agent(ngran_node_t node_type, e2_agent_args_t oai_args)
 
   printf("[E2 NODE]: mcc = %d mnc = %d mnc_digit = %d nb_id = %d \n", mcc, mnc, mnc_digit_len, nb_id);
 
-  printf("[E2 NODE]: Args %s %s \n", args.ip, args.libs_dir);
+  printf("[E2 NODE]: Args Server IP: %s Client IP: %s  Libs Dir %s \n", args.server_ip, args.client_ip, args.libs_dir);
 
   sm_io_ag_ran_t io = init_ran_func_ag();
   init_agent_api(mcc, mnc, mnc_digit_len, nb_id, cu_du_id, node_type, io, &args);
@@ -496,6 +505,128 @@ static void initialize_agent(ngran_node_t node_type, e2_agent_args_t oai_args)
 
 void init_eNB_afterRU(void);
 configmodule_interface_t *uniqCfg = NULL;
+
+void *refresh_cir_variables(void *param)
+{
+  RU_t *ru = (RU_t *)param;
+  int nb_tx = ru->nb_tx;
+  int nb_rx = ru->nb_rx;
+
+  int sockfd;
+  struct sockaddr_in servaddr, cliaddr;
+  socklen_t len = sizeof(cliaddr);
+
+  uint8_t buffer[MAX_UDP_SIZE];
+
+  // Create UDP socket
+  sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sockfd < 0) {
+    perror("UDP socket creation failed");
+    return NULL;
+  }
+
+  // Bind
+  memset(&servaddr, 0, sizeof(servaddr));
+  servaddr.sin_family = AF_INET;
+  servaddr.sin_addr.s_addr = inet_addr(OAIBOX_DT_CHANNEL_EXPORT_ADDRESS);
+  servaddr.sin_port = htons(OAIBOX_DT_CHANNEL_EXPORT_PORT);
+  if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+    perror("UDP bind failed");
+    close(sockfd);
+    return NULL;
+  }
+
+  LOG_I(NR_PHY, "CIR UDP receiver listening on %s:%d\n", OAIBOX_DT_CHANNEL_EXPORT_ADDRESS, OAIBOX_DT_CHANNEL_EXPORT_PORT);
+
+  while (1) {
+    ssize_t n = recvfrom(sockfd, buffer, MAX_UDP_SIZE, 0, (struct sockaddr *)&cliaddr, &len);
+
+    if (n <= 0)
+      continue;
+
+    if (n < 12) {
+      LOG_W(NR_PHY, "Packet too small\n");
+      continue;
+    }
+
+    // Parse header (network byte order / big-endian)
+    char magic[5] = {0};
+    memcpy(magic, buffer, 4);
+    uint32_t version;
+    memcpy(&version, buffer + 4, 4);
+    uint32_t N;
+    memcpy(&N, buffer + 8, 4);
+    version = ntohl(version);
+    N = ntohl(N);
+    if (strncmp(magic, "OAIB", 4) != 0) {
+      LOG_W(NR_PHY, "Invalid magic header\n");
+      continue;
+    }
+    LOG_D(NR_PHY, "Received CIR packet: version=%u, N=%u\n", version, N);
+
+    // Validate expected size
+    size_t expected_size = 12 + (N * 2 * sizeof(float)) + (N * sizeof(int32_t));
+    if ((size_t)n < expected_size) {
+      LOG_W(NR_PHY, "Incomplete packet (got %ld, expected %zu)\n", n, expected_size);
+      continue;
+    }
+
+    // Extract interleaved complex floats
+    cf_t *taps = (cf_t *)(buffer + 12);
+
+    // Extract delay indices
+    int32_t *delay_idx = (int32_t *)(buffer + 12 + (N * 2 * sizeof(float)));
+
+    for (int i = 0; i < N; i++) {
+      LOG_D(NR_PHY, "Tap[%d]: %+.6e %+.6e  delay_idx=%d\n", i, taps[i].r, taps[i].i, delay_idx[i]);
+    }
+
+    // Store into RU structure
+    pthread_mutex_lock(&ru->proc.mutex_mimo);
+    memset(ru->cirMIMO_simulmatrix, 0, nb_tx * nb_rx * ru->channel_length * sizeof(cf_t));
+    for (int l = 0; l < ru->channel_length; l++) {
+      for (int a_tx = 0; a_tx < nb_tx; a_tx++) {
+        for (int a_rx = 0; a_rx < nb_rx; a_rx++) {
+          if (l * nb_tx * nb_rx + nb_rx * a_tx + a_rx >= N)
+            break;
+          ru->cirMIMO_simulmatrix[a_rx * ru->channel_length * nb_tx + l * nb_rx + a_tx] =
+              taps[l * nb_tx * nb_rx + nb_rx * a_tx + a_rx];
+        }
+      }
+    }
+    memset(ru->delayindexlist, 0, ru->channel_length * sizeof(int));
+    for (int l = 0; l < ru->channel_length && l < N; l++) {
+      ru->delayindexlist[l] = delay_idx[l];
+    }
+
+    ru->cir_was_received = true;
+    pthread_mutex_unlock(&ru->proc.mutex_mimo);
+  }
+
+  close(sockfd);
+  return NULL;
+}
+
+void *refresh_noise(void *param)
+{
+  RU_t *ru = (RU_t *)param;
+  uint32_t counter = 0;
+  NR_DL_FRAME_PARMS *fp = ru->nr_frame_parms;
+  uint32_t siglen = get_samples_per_slot(0, fp);
+  while (1) {
+    for (int a = 0; a < ru->nb_tx; a++) {
+      uint32_t c = counter % siglen;
+      pthread_mutex_lock(&ru->proc.mutex_noise);
+      ru->noise_array[a][c].r = (float)gaussZiggurat(0.0, 1.0);
+      ru->noise_array[a][c].i = (float)gaussZiggurat(0.0, 1.0);
+      pthread_mutex_unlock(&ru->proc.mutex_noise);
+    }
+    counter = (counter + 1) % UINT32_MAX;
+    usleep(1000);
+  }
+  return NULL;
+}
+
 int main( int argc, char **argv ) {
   int ru_id, CC_id = 0;
   start_background_system();
@@ -698,6 +829,14 @@ int main( int argc, char **argv ) {
     sync_var=0;
     pthread_cond_broadcast(&sync_cond);
     pthread_mutex_unlock(&sync_mutex);
+
+    // Create thread: refresh mimo matrix, noise
+    if (RC.ru[0]->eth_params.transp_preference == 0) { // RFsim or USRP
+      for (int i = 0; i < RC.nb_RU; i++) {
+        threadCreate(&RC.ru[i]->proc.pthread_mimo, refresh_cir_variables, (void *)RC.ru[i], "refresh_cir_variables", -1, OAI_PRIORITY_RT_LOW);
+        threadCreate(&RC.ru[i]->proc.pthread_mimo, refresh_noise, (void *)RC.ru[i], "refresh_noise", -1, OAI_PRIORITY_RT_LOW);
+      }
+    }
   }
 
   // wait for end of program

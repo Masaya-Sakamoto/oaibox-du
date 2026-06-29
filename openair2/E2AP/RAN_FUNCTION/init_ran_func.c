@@ -4,7 +4,7 @@
 
 #include "init_ran_func.h"
 #include "read_setup_ran.h"
-#include "../flexric/src/agent/e2_agent_api.h"
+#include "agent/e2_agent_api.h"
 
 #if defined (NGRAN_GNB_DU)
 #include "CUSTOMIZED/ran_func_mac.h"

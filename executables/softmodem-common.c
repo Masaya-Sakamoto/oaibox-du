@@ -19,6 +19,8 @@
 
 char *parallel_config=NULL;
 char *worker_config=NULL;
+char *export_srs_channel_ip=NULL;
+uint32_t export_srs_channel_port=0;
 int usrp_tx_thread = 0;
 uint8_t nfapi_mode=0;
 
@@ -54,6 +56,9 @@ void get_common_options(configmodule_interface_t *cfg)
   uint32_t rfsim = 0, do_forms = 0;
   uint32_t enable_imscope = 0;
   uint32_t enable_imscope_record = 0;
+  uint32_t export_mod_symbols = 0;
+  uint32_t export_srs_channel = 0;
+  uint32_t export_srs_isac = 0;
   int nfapi_index = 0;
   char *logmem_filename = NULL;
 
@@ -120,6 +125,18 @@ void get_common_options(configmodule_interface_t *cfg)
 
   if (enable_imscope_record) {
     IS_SOFTMODEM_IMSCOPE_RECORD_ENABLED = true;
+  }
+
+  if (export_mod_symbols) {
+    IS_SOFTMODEM_EXPORT_MOD_SYMBOLS_ENABLED = true;
+  }
+
+  if (export_srs_channel) {
+    IS_SOFTMODEM_EXPORT_SRS_CHANNEL_ENABLED = true;
+  }
+
+  if (export_srs_isac) {
+    IS_SOFTMODEM_EXPORT_SRS_ISAC_ENABLED = true;
   }
 
   if (start_websrv) {

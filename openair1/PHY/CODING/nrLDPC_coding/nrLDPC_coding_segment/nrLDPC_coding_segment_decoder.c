@@ -13,7 +13,9 @@
 #include "PHY/CODING/nrLDPC_coding/nrLDPC_coding_interface.h"
 #include "PHY/CODING/nrLDPC_extern.h"
 #include "defs.h"
+#include "PHY/defs_gNB.h"
 #include "common/utils/LOG/log.h"
+#include "PHY/CODING/TESTBENCH/coding_unitary_defs.h"
 
 #include <stdalign.h>
 #include <stdint.h>
@@ -202,6 +204,10 @@ static void nr_process_decode_segment(void *arg)
   start_meas(&rdata->ts_ldpc_decode);
   int decodeIterations = LDPCdecoder(p_decoderParms, l, (uint8_t *)llrProcBuf, p_procTime, rdata->abort_decode);
   AssertFatal(rdata->c, "rdata->c is null, A %d, K %d\n", rdata->A, rdata->K);
+  if (RC.gNB) {
+    RC.gNB[0]->ldpc_iterations_count += decodeIterations;
+    RC.gNB[0]->segments_count++;
+  }
   if (decodeIterations < p_decoderParms->numMaxIter) {
     memcpy(rdata->c, llrProcBuf, K >> 3);
     *rdata->decodeSuccess = true;

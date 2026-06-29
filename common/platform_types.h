@@ -26,10 +26,13 @@ typedef struct complex8 {
   int8_t i;
 } c8_t;
 
+#ifndef C16_T_DEFINED
 typedef struct complex16 {
   int16_t r;
   int16_t i;
 } c16_t;
+#define C16_T_DEFINED
+#endif
 
 typedef struct complex32 {
   int32_t r;

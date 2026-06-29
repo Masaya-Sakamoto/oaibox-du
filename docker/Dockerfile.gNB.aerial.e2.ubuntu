@@ -1,0 +1,230 @@
+#/*
+# * Licensed to the OpenAirInterface (OAI) Software Alliance under one or more
+# * contributor license agreements.  See the NOTICE file distributed with
+# * this work for additional information regarding copyright ownership.
+# * The OpenAirInterface Software Alliance licenses this file to You under
+# * the OAI Public License, Version 1.1  (the "License"); you may not use this file
+# * except in compliance with the License.
+# * You may obtain a copy of the License at
+# *
+# *      http://www.openairinterface.org/?page_id=698
+# *
+# * Unless required by applicable law or agreed to in writing, software
+# * distributed under the License is distributed on an "AS IS" BASIS,
+# * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# * See the License for the specific language governing permissions and
+# * limitations under the License.
+# *-------------------------------------------------------------------------------
+# * For more information about the OpenAirInterface (OAI) Software Alliance:
+# *      contact@openairinterface.org
+# */
+#---------------------------------------------------------------------
+#
+# Dockerfile for the Open-Air-Interface BUILD service
+#   Valid for Ubuntu 24.04
+#
+#---------------------------------------------------------------------
+
+ARG UBUNTU_IMAGE=ubuntu:noble
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 1: ran-base – build tools + UHD installed from source (USRP driver)
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ${UBUNTU_IMAGE} AS ran-base
+
+ARG NEEDED_GIT_PROXY
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+ENV BUILD_UHD_FROM_SOURCE=True
+ENV UHD_VERSION=4.10.0.0
+
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    apt-get install --yes \
+        build-essential \
+        ccache \
+        psmisc \
+        git \
+        xxd \
+        libpcre2-dev \
+        python3-dev \
+        bison \
+        flex \
+        m4 \
+        libzstd-dev \
+        python3-pip \
+        wget \
+        flatbuffers-compiler \
+        libflatbuffers-dev \
+        libnanomsg-dev && \
+    pip3 install --ignore-installed pyyaml --break-system-packages
+
+# Tini – tiny init for containers
+ENV TINI_VERSION=v0.19.0
+RUN wget https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TARGETARCH} -O /tini && \
+    chmod +x /tini
+
+ENV YQ_VERSION=v4.2.0
+RUN wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${TARGETARCH} -O /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+RUN /bin/bash -c "if [[ -v NEEDED_GIT_PROXY ]]; then git config --global http.proxy $NEEDED_GIT_PROXY; fi"
+
+WORKDIR /oai-ran/cmake_targets/tools
+COPY cmake_targets/tools/build_helper \
+     cmake_targets/tools/uhd-4.x-tdd-patch.diff \
+     ./
+
+WORKDIR /oai-ran/cmake_targets
+COPY cmake_targets/build_oai .
+
+WORKDIR /oai-ran
+COPY oaienv .
+
+# Install OAI build dependencies + UHD driver from source (USRP only)
+RUN /bin/sh oaienv && \
+    cd cmake_targets && \
+    mkdir -p log && \
+    ./build_oai -I --install-optional-packages
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 2: ran-build – OAI gNB (Aerial) + FlexRIC
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ran-base AS ran-build
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       wget \
+       ninja-build \
+       #unzip is needed for protobuf
+       unzip \
+       moreutils \
+       vim-tiny \
+       nano \
+       gcc-12  g++-12\
+       # To build libnvipc
+       cmake libpcap-dev libcunit1-dev libnuma-dev pkg-config
+# && \
+#       update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 --slave /usr/bin/g++ g++ /usr/bin/g++-12
+
+ARG E2AP_VERSION=E2AP_V3
+ARG KPM_VERSION=KPM_V3_00
+
+RUN rm -Rf /oai-ran
+WORKDIR /oai-ran
+COPY . .
+
+RUN /bin/sh oaienv && \
+    tar -xvzf nvipc_src.*.tar.gz && \
+    cd nvipc_src.* && \
+    rm -rf build && mkdir build && cd build && \
+    cmake .. -DNVIPC_DPDK_ENABLE=OFF -DNVIPC_DOCA_ENABLE=OFF -DNVIPC_CUDA_ENABLE=OFF -DENABLE_SLT_RSP=ON && \
+    make -j && make install
+
+RUN /bin/sh oaienv && \
+    cd cmake_targets && \
+    mkdir -p log && \
+    ./build_oai -I --install-optional-packages
+
+
+RUN /bin/sh oaienv && \
+    cd cmake_targets && \
+    mkdir -p log && \
+    ./build_oai -c -w AERIAL --gNB --ninja --build-tool-opt -k10 \
+      --build-e2 --cmake-opt -DXAPP_MULTILANGUAGE=OFF --cmake-opt -DKPM_VERSION=$KPM_VERSION --cmake-opt -DE2AP_VERSION=$E2AP_VERSION
+
+## Build FlexRIC for SM Models
+RUN mkdir -p openair2/E2AP/flexric/build && \
+    cd openair2/E2AP/flexric/build && \
+    cmake -GNinja -DCMAKE_BUILD_TYPE=Release \
+          -DXAPP_MULTILANGUAGE=OFF \
+          -DKPM_VERSION=$KPM_VERSION \
+          -DE2AP_VERSION=$E2AP_VERSION \
+          -DCMAKE_C_COMPILER=gcc-12 \
+          -DCMAKE_CXX_COMPILER=g++-12 .. && \
+    ninja && \
+    ninja install
+
+
+#start from scratch for target executable
+FROM ubuntu:noble AS oai-gnb-aerial
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe
+
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    apt-get install --yes \
+        software-properties-common \
+        procps \
+        libsctp1 \
+        libgomp1 \
+        libboost-chrono1.83.0 \
+        libboost-date-time1.83.0 \
+        libboost-filesystem1.83.0 \
+        libboost-regex1.83.0 \
+        libboost-serialization1.83.0 \
+        libboost-thread1.83.0 \
+        libboost-system1.83.0 \
+        libboost-program-options1.83.0 \
+        tzdata \
+        libblas3 \
+        libconfig9 \
+        pciutils \
+        libpcap-dev \
+        xz-utils \
+        libnuma-dev \
+        gdb \
+        python3 \
+        python3-six \
+        python3-requests \
+        openssl \
+        net-tools \
+        iperf \
+        iproute2 \
+        iputils-ping \
+        gdb \
+        moreutils \
+        libusb-1.0-0 \
+        libnanomsg5 \
+        libyaml-cpp-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+## Copy E2 SM models
+COPY --from=ran-build /usr/local/lib/flexric /usr/local/lib/flexric
+
+WORKDIR /opt/oai-gnb/bin
+COPY --from=ran-build \
+    /oai-ran/cmake_targets/ran_build/build/nr-softmodem ./
+COPY ./docker/scripts/gnb_entrypoint.sh ./entrypoint.sh
+
+COPY --from=ran-build \
+  /oai-ran/cmake_targets/ran_build/build/libparams_libconfig.so \
+  /oai-ran/cmake_targets/ran_build/build/libparams_yaml.so \
+  /usr/local/lib/
+
+# BLIS multi-threaded library (source-built with multi-config in ran-base;
+# runtime-dispatched so the image is portable across x86_64 and arm64 CPUs).
+COPY --from=ran-base /usr/local/lib/libblis-mt.so* /usr/local/lib/
+
+#copy files from nvIPC
+COPY --from=ran-build \
+    /usr/local/lib/libfmtlog-shared.so \
+    /usr/local/lib/libnvlog.so \
+    /usr/local/lib/libnvipc.so \
+    /usr/local/lib/
+
+RUN ldconfig && \
+    echo "---- ldd on nr-softmodem ----" && \
+    ldd /opt/oai-gnb/bin/nr-softmodem && \
+    echo "---- ldd on shared libraries ----" && \
+    ldd /usr/local/lib/libparams_libconfig.so \
+        /usr/local/lib/libfmtlog-shared.so \
+        /usr/local/lib/libnvlog.so \
+        /usr/local/lib/libnvipc.so
+
+WORKDIR /opt/oai-gnb
+COPY --from=ran-build /usr/local/bin/yq /usr/local/bin/yq
+ENTRYPOINT ["/opt/oai-gnb/bin/entrypoint.sh"]
+CMD ["/opt/oai-gnb/bin/nr-softmodem"]

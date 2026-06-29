@@ -265,6 +265,11 @@ typedef struct gNB_RRC_UE_s {
   delayed_action_state_t delayed_action;
 
   nr_redcap_ue_cap_t *redcap_cap;
+
+  long rsrp;
+  double rsrq;
+  double sinr;
+  double ho_elapsed_ms;
 } gNB_RRC_UE_t;
 
 typedef struct rrc_gNB_ue_context_s {
@@ -480,6 +485,11 @@ typedef struct nr_rrc_cell_container_t {
   NR_MeasurementTimingConfiguration_t *mtc;
 } nr_rrc_cell_container_t;
 
+typedef void (*trigger_f1_ho_func_t)(struct gNB_RRC_INST_s *rrc, uint32_t rrc_ue_id, uint64_t target_cell_id);
+typedef struct xapp_s {
+  trigger_f1_ho_func_t trigger_f1_ho;
+} xapp_t;
+
 typedef struct nr_rrc_du_container_t {
   /* Tree-related data */
   RB_ENTRY(nr_rrc_du_container_t) entries;
@@ -626,6 +636,7 @@ typedef struct gNB_RRC_INST_s {
 
   nr_mac_rrc_dl_if_t mac_rrc;
   cucp_cuup_if_t cucp_cuup;
+  xapp_t xapp;
   // Per-frequency SIB4 configurations, indexed by ARFCN
   seq_arr_t inter_freqs; /* array of nr_inter_freq_cfg_t */
   // Per-cell neighbour configurations, indexed by cell_id

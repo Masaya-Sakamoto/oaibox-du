@@ -180,6 +180,21 @@ static int compare_dl_pf_rb_ptrs(const void *a, const void *b)
       ca->is_retx ? INFINITY : dl_pf_weight(ca->sched_pdsch.mcs, ca->mcs_table, ca->sched_pdsch.nrOfLayers, ca->avg_throughput);
   float wb =
       cb->is_retx ? INFINITY : dl_pf_weight(cb->sched_pdsch.mcs, cb->mcs_table, cb->sched_pdsch.nrOfLayers, cb->avg_throughput);
+
+  // Apply NSSAI specific scheduling coefficients
+  NR_UE_sched_ctrl_t *sched_ctrl_a = &ca->UE->UE_sched_ctrl;
+  for (int i = 0; i < seq_arr_size(&sched_ctrl_a->lc_config); ++i) {
+    const nr_lc_config_t *c = seq_arr_at(&sched_ctrl_a->lc_config, i);
+    wa = wa * get_nssai_sched_coeff(c->nssai.sst);
+  }
+
+  // Apply NSSAI specific scheduling coefficients
+  NR_UE_sched_ctrl_t *sched_ctrl_b = &cb->UE->UE_sched_ctrl;
+  for (int i = 0; i < seq_arr_size(&sched_ctrl_b->lc_config); ++i) {
+    const nr_lc_config_t *c = seq_arr_at(&sched_ctrl_b->lc_config, i);
+    wb = wb * get_nssai_sched_coeff(c->nssai.sst);
+  }
+
   return (wa < wb) - (wa > wb);
 }
 
@@ -205,14 +220,9 @@ int nr_dl_proportional_fair(const nr_dl_sched_params_t *params, nr_dl_candidate_
     int needed_rbs = cand->retx_rbSize;
     uint16_t *vrb_map = params->vrb_map[cand->alloc_beam_idx];
     int rbStart, rbSize;
-    if (!get_rb_alloc(needed_rbs,
-                      cand->bwp_size,
-                      cand->bwp_start,
-                      cand->bwp_size,
-                      vrb_map,
-                      cand->alloc_slbitmap,
-                      &rbStart,
-                      &rbSize))
+    int x_start = cand->slice_active ? cand->slice_start : cand->bwp_start;
+    int x_size = cand->slice_active ? cand->slice_size : cand->bwp_size;
+    if (!get_rb_alloc(needed_rbs, x_size, x_start, x_size, vrb_map, cand->alloc_slbitmap, &rbStart, &rbSize))
       continue;
 
     COMMIT_ALLOC(params, cand, rbStart, needed_rbs, cand->sched_pdsch.mcs, n_scheduled);
@@ -226,14 +236,9 @@ int nr_dl_proportional_fair(const nr_dl_sched_params_t *params, nr_dl_candidate_
 
     uint16_t *vrb_map = params->vrb_map[cand->alloc_beam_idx];
     int rbStart, rbSize;
-    if (!get_rb_alloc(min_rbSize,
-                      cand->bwp_size,
-                      cand->bwp_start,
-                      cand->bwp_size,
-                      vrb_map,
-                      cand->alloc_slbitmap,
-                      &rbStart,
-                      &rbSize))
+    int x_start = cand->slice_active ? cand->slice_start : cand->bwp_start;
+    int x_size = cand->slice_active ? cand->slice_size : cand->bwp_size;
+    if (!get_rb_alloc(min_rbSize, x_size, x_start, x_size, vrb_map, cand->alloc_slbitmap, &rbStart, &rbSize))
       continue;
 
     COMMIT_ALLOC(params, cand, rbStart, min_rbSize, cand->sched_pdsch.mcs, n_scheduled);
@@ -247,7 +252,12 @@ int nr_dl_proportional_fair(const nr_dl_sched_params_t *params, nr_dl_candidate_
 
     int rbStart;
     uint16_t *vrb_map = params->vrb_map[cand->alloc_beam_idx];
-    int max_rbSize = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &rbStart);
+    int x_start = cand->slice_active ? cand->slice_start : cand->bwp_start;
+    int x_size = cand->slice_active ? cand->slice_size : cand->bwp_size;
+    int max_rbSize = find_largest_free_block(vrb_map, cand->alloc_slbitmap, x_start, x_size, &rbStart);
+    if (cand->slice_active) {
+      rbStart += cand->slice_start;
+    }
     if (max_rbSize < min_rbSize)
       continue;
 

@@ -105,6 +105,7 @@ static void nr_initiate_handover(const gNB_RRC_INST *rrc,
   }
 
   nr_handover_context_t *ho_ctx = ue->ho_context;
+  clock_gettime(CLOCK_REALTIME, &ho_ctx->ho_start_ts);
   const nr_rrc_cell_container_t *target_cell = ho_ctx->target->cell;
   DevAssert(target_cell != NULL);
 
@@ -348,6 +349,53 @@ void nr_HO_F1_trigger_telnet(gNB_RRC_INST *rrc, uint32_t rrc_ue_id)
   }
 
   nr_rrc_trigger_f1_ho(rrc, ue, source_cell, target_cell);
+}
+
+void xapp_trigger_f1_ho(gNB_RRC_INST *rrc, uint32_t rrc_ue_id, uint64_t target_cell_id)
+{
+  rrc_gNB_ue_context_t *ue_context_p = rrc_gNB_get_ue_context(rrc, rrc_ue_id);
+  if (ue_context_p == NULL) {
+    LOG_E(NR_RRC, "cannot find UE context for UE ID %d\n", rrc_ue_id);
+    return;
+  }
+  gNB_RRC_UE_t *ue = &ue_context_p->ue_context;
+  nr_rrc_du_container_t *source_du = get_du_for_ue(rrc, ue->rrc_ue_id);
+  if (source_du == NULL) {
+    f1_ue_data_t ue_data = cu_get_f1_ue_data(rrc_ue_id);
+    LOG_E(NR_RRC, "cannot get source gNB-DU with assoc_id %d for UE %u\n", ue_data.du_assoc_id, ue->rrc_ue_id);
+    return;
+  }
+  nr_rrc_cell_container_t *source_cell = rrc_get_pcell_for_ue(rrc, ue);
+  if (source_cell == NULL) {
+    LOG_E(NR_RRC, "cannot get source cell for UE %u\n", ue->rrc_ue_id);
+    return;
+  }
+
+  nr_rrc_du_container_t *target_du = find_target_du(rrc, source_du->assoc_id);
+  if (target_du == NULL) {
+    LOG_E(NR_RRC, "No target gNB-DU found. Handover for UE %u aborted.\n", ue->rrc_ue_id);
+    return;
+  }
+
+  nr_rrc_cell_container_t *target_cell = NULL;
+  FOR_EACH_SEQ_ARR (nr_rrc_cell_container_t **, cell_ptr, &target_du->cells) {
+    nr_rrc_cell_container_t *c = *cell_ptr;
+    if (c->info.cell_id == target_cell_id) {
+      target_cell = *cell_ptr;
+      break;
+    }
+  }
+  if (target_cell == NULL) {
+    LOG_E(NR_RRC, "cannot get target cell for UE %u\n", ue->rrc_ue_id);
+    return;
+  }
+
+  nr_rrc_trigger_f1_ho(rrc, ue, source_cell, target_cell);
+}
+
+void xapp_rrc_init(xapp_t *xapp)
+{
+  xapp->trigger_f1_ho = xapp_trigger_f1_ho;
 }
 
 /** @brief Generate the HandoverPreparationInformation to be carried

@@ -371,13 +371,49 @@ set(E2_AGENT "OFF" CACHE STRING "O-RAN-compliant E2 Agent")
 set_property(CACHE E2_AGENT PROPERTY STRINGS "ON" "OFF")
 
 if (E2_AGENT)
-  set(E2AP_VERSION "E2AP_V2" CACHE STRING "E2AP version")
+  set(E2AP_VERSION "E2AP_V3" CACHE STRING "E2AP version")
   set_property(CACHE E2AP_VERSION PROPERTY STRINGS "E2AP_V1" "E2AP_V2" "E2AP_V3")
   message(STATUS "Selected E2AP version: ${E2AP_VERSION}")
 
-  set(KPM_VERSION "KPM_V2_03" CACHE STRING "The KPM SM version to use")
+  set(KPM_VERSION "KPM_V3_00" CACHE STRING "The KPM SM version to use")
   set_property(CACHE KPM_VERSION PROPERTY STRINGS "KPM_V2_03" "KPM_V3_00")
   message(STATUS "Selected KPM version: ${KPM_VERSION}")
+
+  # Resolve FlexRIC source location early so targets defined before the E2AP
+  # subdirectory is processed (e.g. L2_NR) can use FLEXRIC_DIR for includes.
+  # Priority order:
+  #   1. Populated git submodule  (openair2/E2AP/flexric/)
+  #   2. FLEXRIC_SOURCE_DIR       (default: ~/flexric)
+  #   3. git submodule init/update (last resort)
+  set(FLEXRIC_SOURCE_DIR "$ENV{HOME}/flexric" CACHE PATH
+      "Path to FlexRIC source tree, used when the git submodule is not populated")
+
+  if(EXISTS "${CMAKE_SOURCE_DIR}/openair2/E2AP/flexric/CMakeLists.txt")
+    set(FLEXRIC_DIR "${CMAKE_SOURCE_DIR}/openair2/E2AP/flexric")
+    message(STATUS "FlexRIC: using git submodule at ${FLEXRIC_DIR}")
+  elseif(EXISTS "${FLEXRIC_SOURCE_DIR}/CMakeLists.txt")
+    set(FLEXRIC_DIR "${FLEXRIC_SOURCE_DIR}")
+    message(STATUS "FlexRIC: using external source at ${FLEXRIC_DIR}")
+  else()
+    message(STATUS "FlexRIC not found in submodule or FLEXRIC_SOURCE_DIR (${FLEXRIC_SOURCE_DIR}), "
+                   "falling back to git submodule init && git submodule update")
+    execute_process(COMMAND git submodule init
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    execute_process(COMMAND git submodule update
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/openair2/E2AP/flexric/CMakeLists.txt")
+      set(FLEXRIC_DIR "${CMAKE_SOURCE_DIR}/openair2/E2AP/flexric")
+      message(STATUS "FlexRIC: using git submodule at ${FLEXRIC_DIR} (after init/update)")
+    else()
+      message(FATAL_ERROR
+        "FlexRIC source not found. Tried in order:\n"
+        "  1. Git submodule:      ${CMAKE_SOURCE_DIR}/openair2/E2AP/flexric\n"
+        "  2. FLEXRIC_SOURCE_DIR: ${FLEXRIC_SOURCE_DIR}\n"
+        "  3. git submodule init && git submodule update\n"
+        "Either populate the submodule (git submodule update --init openair2/E2AP/flexric) "
+        "or set -DFLEXRIC_SOURCE_DIR=/path/to/flexric at configure time.")
+    endif()
+  endif()
 endif()
 
 add_boolean_option(ENABLE_IMSCOPE OFF "Enable phy scope based on imgui" OFF)
@@ -543,6 +579,7 @@ target_link_libraries(f1ap PRIVATE ngap nr_rrc ds f1ap_lib)
 target_include_directories(f1ap PRIVATE ${F1AP_DIR}/lib)
 if(E2_AGENT)
   target_compile_definitions(f1ap PRIVATE E2_AGENT)
+  target_include_directories(f1ap PRIVATE ${FLEXRIC_DIR}/src ${FLEXRIC_DIR}/test/rnd)
 endif()
 
 # LPP
@@ -1007,8 +1044,16 @@ add_dependencies(PHY_COMMON dfts)
 add_library(PHY ${PHY_SRC})
 target_link_libraries(PHY PRIVATE asn1_lte_rrc_hdrs asn1_nr_rrc_hdrs)
 
+pkg_check_modules(blis REQUIRED blis)
+
 add_library(PHY_UE ${PHY_SRC_UE})
 target_link_libraries(PHY_UE PRIVATE asn1_lte_rrc_hdrs asn1_nr_rrc_hdrs UTIL)
+
+# RHEL needs also cblis, but Ubuntu does not have it. So `cblis_LIBRARIES` will
+# be empty for Ubuntu, a no-op
+pkg_check_modules(cblis cblis)
+target_link_libraries(PHY_UE PRIVATE ${blis_LIBRARIES} ${cblis_LIBRARIES} ${lapacke_LIBRARIES})
+target_include_directories(PHY_UE PRIVATE ${blis_INCLUDE_DIRS} ${lapacke_INCLUDE_DIRS})
 
 add_library(PHY_NR_COMMON ${PHY_NR_SRC_COMMON})
 target_link_libraries(PHY_NR_COMMON PUBLIC UTIL)
@@ -1277,6 +1322,7 @@ target_link_libraries(L2 PRIVATE asn1_lte_rrc_hdrs asn1_nr_rrc_hdrs)
 target_link_libraries(L2 PRIVATE nfapi_vnf_lib nfapi_pnf_lib)
 if(E2_AGENT)
   target_compile_definitions(L2 PRIVATE ${E2AP_VERSION} ${KPM_VERSION} E2_AGENT)
+  target_include_directories(L2 PRIVATE ${FLEXRIC_DIR}/src ${FLEXRIC_DIR}/test/rnd)
 endif()
 
 add_library(MAC_UE_NR ${MAC_NR_SRC_UE})
@@ -1296,6 +1342,7 @@ target_link_libraries(L2_NR PRIVATE nfapi_vnf_lib)
 target_include_directories(L2_NR PRIVATE ${F1AP_DIR}/lib)
 if(E2_AGENT)
   target_compile_definitions(L2_NR PRIVATE ${E2AP_VERSION} ${KPM_VERSION} E2_AGENT)
+  target_include_directories(L2_NR PRIVATE ${FLEXRIC_DIR}/src ${FLEXRIC_DIR}/test/rnd)
 endif()
 
 add_library(e1_if
@@ -1711,10 +1758,12 @@ target_link_libraries(lte-softmodem PRIVATE
 target_link_libraries(lte-softmodem PRIVATE pthread m CONFIG_LIB rt)
 target_link_libraries(lte-softmodem PRIVATE ${T_LIB})
 target_link_libraries(lte-softmodem PRIVATE asn1_nr_rrc_hdrs asn1_lte_rrc_hdrs)
+target_link_libraries(lte-softmodem PRIVATE ${blis_LIBRARIES} ${cblis_LIBRARIES} ${lapacke_LIBRARIES} ${lapack_LIBRARIES})
 
 if(E2_AGENT)
   target_link_libraries(lte-softmodem PUBLIC e2_agent e2_agent_arg e2_ran_func_du_cucp_cuup)
   target_compile_definitions(lte-softmodem PRIVATE ${E2AP_VERSION} ${KPM_VERSION} E2_AGENT)
+  target_include_directories(lte-softmodem PRIVATE ${FLEXRIC_DIR}/src ${FLEXRIC_DIR}/test/rnd)
 endif()
 
 add_executable(oairu
@@ -1765,6 +1814,7 @@ target_link_libraries(lte-uesoftmodem PRIVATE
 target_link_libraries(lte-uesoftmodem PRIVATE pthread m CONFIG_LIB rt)
 target_link_libraries(lte-uesoftmodem PRIVATE ${T_LIB})
 target_link_libraries(lte-uesoftmodem PRIVATE asn1_nr_rrc_hdrs asn1_lte_rrc_hdrs)
+target_link_libraries(lte-uesoftmodem PRIVATE ${blis_LIBRARIES} ${cblis_LIBRARIES} ${lapacke_LIBRARIES} ${lapack_LIBRARIES})
 
 # force the generation of ASN.1 so that we don't need to wait during the build
 target_link_libraries(lte-uesoftmodem PRIVATE
@@ -1815,6 +1865,7 @@ target_link_libraries(nr-softmodem PRIVATE pthread m CONFIG_LIB rt)
 target_link_libraries(nr-softmodem PRIVATE ${T_LIB})
 target_link_libraries(nr-softmodem PRIVATE asn1_nr_rrc_hdrs asn1_lte_rrc_hdrs)
 target_link_libraries(nr-softmodem PRIVATE asn1_nr_rrc_hdrs asn1_lte_rrc_hdrs)
+target_link_libraries(nr-softmodem PRIVATE ${blis_LIBRARIES} ${cblis_LIBRARIES} ${lapacke_LIBRARIES})
 add_boolean_option(OAI_WLS OFF "Activate OAI's WLS driver" OFF)
 add_boolean_option(OAI_AERIAL OFF "Activate OAI's AERIAL driver" OFF)
 if (OAI_WLS)
@@ -1828,6 +1879,7 @@ endif()
 if(E2_AGENT)
   target_link_libraries(nr-softmodem PUBLIC e2_agent e2_agent_arg e2_ran_func_du_cucp_cuup)
   target_compile_definitions(nr-softmodem PRIVATE ${E2AP_VERSION} ${KPM_VERSION} E2_AGENT)
+  target_include_directories(nr-softmodem PRIVATE ${FLEXRIC_DIR}/src ${FLEXRIC_DIR}/test/rnd)
 endif()
 
 
@@ -1854,6 +1906,7 @@ target_compile_definitions(nr-cuup PRIVATE PDCP_CUCP_CUUP)
 if(E2_AGENT)
   target_link_libraries(nr-cuup PRIVATE e2_agent e2_agent_arg e2_ran_func_cuup)
   target_compile_definitions(nr-cuup PRIVATE ${E2AP_VERSION} ${KPM_VERSION} E2_AGENT)
+  target_include_directories(nr-cuup PRIVATE ${FLEXRIC_DIR}/src ${FLEXRIC_DIR}/test/rnd)
 endif()
 
 # nr-uesoftmodem is  UE implementation

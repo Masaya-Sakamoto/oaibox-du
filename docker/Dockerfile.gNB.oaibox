@@ -1,0 +1,318 @@
+#/*
+# * Licensed to the OpenAirInterface (OAI) Software Alliance under one or more
+# * contributor license agreements.  See the NOTICE file distributed with
+# * this work for additional information regarding copyright ownership.
+# * The OpenAirInterface Software Alliance licenses this file to You under
+# * the OAI Public License, Version 1.1  (the "License"); you may not use this file
+# * except in compliance with the License.
+# * You may obtain a copy of the License at
+# *
+# *      http://www.openairinterface.org/?page_id=698
+# *
+# * Unless required by applicable law or agreed to in writing, software
+# * distributed under the License is distributed on an "AS IS" BASIS,
+# * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# * See the License for the specific language governing permissions and
+# * limitations under the License.
+# *-------------------------------------------------------------------------------
+# * For more information about the OpenAirInterface (OAI) Software Alliance:
+# *      contact@openairinterface.org
+# */
+#---------------------------------------------------------------------
+#
+# Combined multi-stage Dockerfile for OAIBOX gNB with both
+#   - USRP/UHD (built from source)
+#   - FHI 7.2 (O-RAN split 7.2, xran + DPDK)
+# Valid for Ubuntu 24.04
+#
+# Build:
+#   docker build -t <image>:<tag> \
+#     -f docker/Dockerfile.gNB.oaibox .
+#
+#---------------------------------------------------------------------
+
+ARG UBUNTU_IMAGE=ubuntu:noble
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 1: ran-base – build tools + UHD installed from source (USRP driver)
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ${UBUNTU_IMAGE} AS ran-base
+
+ARG NEEDED_GIT_PROXY
+ARG TARGETARCH
+ARG xran_VERSION=oran_f_release_v1.0
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+ENV BUILD_UHD_FROM_SOURCE=True
+ENV UHD_VERSION=4.10.0.0
+
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    apt-get install --yes \
+        build-essential \
+        ccache \
+        psmisc \
+        git \
+        xxd \
+        libpcre2-dev \
+        python3-dev \
+        bison \
+        flex \
+        m4 \
+        libzstd-dev \
+        python3-pip \
+        wget \
+        flatbuffers-compiler \
+        libflatbuffers-dev \
+        libnanomsg-dev && \
+    pip3 install --ignore-installed pyyaml --break-system-packages
+
+# Tini – tiny init for containers
+ENV TINI_VERSION=v0.19.0
+RUN wget https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TARGETARCH} -O /tini && \
+    chmod +x /tini
+
+ENV YQ_VERSION=v4.2.0
+RUN wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${TARGETARCH} -O /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+RUN /bin/bash -c "if [[ -v NEEDED_GIT_PROXY ]]; then git config --global http.proxy $NEEDED_GIT_PROXY; fi"
+
+WORKDIR /oai-ran/cmake_targets/tools
+COPY cmake_targets/tools/build_helper \
+     cmake_targets/tools/uhd-4.x-tdd-patch.diff \
+     ./
+
+WORKDIR /oai-ran/cmake_targets
+COPY cmake_targets/build_oai .
+
+WORKDIR /oai-ran
+COPY oaienv .
+
+# Install OAI build dependencies + UHD driver from source (USRP only)
+RUN /bin/sh oaienv && \
+    cd cmake_targets && \
+    mkdir -p log && \
+    ./build_oai -I -w USRP --install-optional-packages
+
+# Arm-only: ArmRAL (liboran_fhlib_5g.so's CMakeLists does find_package(armral REQUIRED) on aarch64)
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        git clone https://git.gitlab.arm.com/networking/ral.git /tmp/ral && \
+        cd /tmp/ral && \
+        git checkout armral-25.01 && \
+        mkdir build && cd build && \
+        cmake -GNinja -DBUILD_SHARED_LIBS=On .. && \
+        ninja && ninja install && \
+        cd / && rm -rf /tmp/ral; \
+    fi
+
+# Extra packages required to build DPDK + xran (O-RAN FHI 7.2 split).
+# Installed here (not in ran-build) so the base stage is a complete
+# "ready-to-build" environment for both USRP and FHI 7.2 paths.
+RUN apt-get update && \
+    apt-get install --yes \
+        python3-pyelftools \
+        meson \
+        xz-utils \
+        libnuma-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# FHI 7.2 integration patches (needed by the xran build below).
+COPY cmake_targets/tools/oran_fhi_integration_patches/ \
+     /oai-ran/cmake_targets/tools/oran_fhi_integration_patches/
+
+## Download and build DPDK (needed by xran/FHI 7.2). Kept under /opt so it
+## survives the `rm -rf /oai-ran` performed by the ran-build stage.
+RUN wget http://fast.dpdk.org/rel/dpdk-20.11.9.tar.xz -O /opt/dpdk-20.11.9.tar.xz&& \
+    tar -xf /opt/dpdk-20.11.9.tar.xz -C /opt/ && \
+    rm /opt/dpdk-20.11.9.tar.xz && \
+    cd /opt/dpdk-stable-20.11.9 && \
+    meson setup build && \
+    ninja -C build && \
+    ninja install -C build
+
+## Build Fronthaul library (O-RAN FHI 7.2 xran)
+## xran's Makefile defaults to RTE_TARGET=x86_64-native-linux-icc with AVX-512
+## flags; on aarch64 we need TARGET=armv8 to switch to the Arm target.
+RUN git clone https://github.com/openairinterface/o-du-phy /opt/phy && \
+    cd /opt/phy && \
+    git checkout $xran_VERSION && \
+    git apply /oai-ran/cmake_targets/tools/oran_fhi_integration_patches/F/oaioran_F.patch && \
+    cd /opt/phy/fhi_lib/lib && \
+    if [ "$TARGETARCH" = "arm64" ]; then xran_target="TARGET=armv8"; else xran_target=""; fi && \
+    env $xran_target WIRELESS_SDK_TOOLCHAIN=gcc RTE_SDK=/opt/dpdk-stable-20.11.9/ XRAN_DIR=/opt/phy/fhi_lib make XRAN_LIB_SO=1
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 2: ran-build – OAI gNB (USRP + FHI7.2) + FlexRIC
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ran-base AS ran-build
+
+ARG BUILD_OPTION
+ARG E2AP_VERSION=E2AP_V3
+ARG KPM_VERSION=KPM_V3_00
+ARG xran_VERSION=oran_f_release_v1.0
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+# Replace the partial source tree from the base stage with the full repo
+RUN rm -rf /oai-ran
+WORKDIR /oai-ran
+COPY . .
+
+## Build OAI gNB with both USRP and FHI 7.2 transports
+RUN \
+    --mount=type=cache,target=/root/.cache/ccache/ \
+    --mount=type=cache,target=/root/.cache/cpm/ \
+    /bin/sh oaienv && \
+    cd cmake_targets && \
+    mkdir -p log && \
+    ./build_oai -c --ninja --gNB \
+        -w USRP -t oran_fhlib_5g \
+        --cmake-opt -Dxran_LOCATION=/opt/phy/fhi_lib/lib \
+        --build-e2 --cmake-opt -DKPM_VERSION=$KPM_VERSION --cmake-opt -DE2AP_VERSION=$E2AP_VERSION \
+        $BUILD_OPTION && \
+    echo "---- ldd on executables ----" && \
+    ldd ran_build/build/*softmodem* ran_build/build/nr-cuup && \
+    echo "---- ldd on shared libraries ----" && \
+    ldd ran_build/build/*.so && \
+    ldd ran_build/build/liboran_fhlib_5g.so && \
+    ldd /opt/phy/fhi_lib/lib/build/libxran.so
+
+## Build FlexRIC SM models
+RUN \
+    --mount=type=cache,target=/root/.cache/ccache/ \
+    mkdir -p openair2/E2AP/flexric/build && \
+    cd openair2/E2AP/flexric/build && \
+    cmake -GNinja -DCMAKE_BUILD_TYPE=Release \
+          -DKPM_VERSION=$KPM_VERSION \
+          -DE2AP_VERSION=$E2AP_VERSION .. && \
+    ninja && \
+    ninja install
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 3: oai-gnb – runtime image with both UHD and xran/DPDK runtime deps
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ${UBUNTU_IMAGE} AS oai-gnb
+
+ARG BUILD_OPTION
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    apt-get install --yes \
+        software-properties-common \
+        procps \
+        pkg-config \
+        libsctp1 \
+        libgomp1 \
+        libboost-chrono1.83.0 \
+        libboost-date-time1.83.0 \
+        libboost-filesystem1.83.0 \
+        libboost-regex1.83.0 \
+        libboost-serialization1.83.0 \
+        libboost-thread1.83.0 \
+        libboost-system1.83.0 \
+        libboost-program-options1.83.0 \
+        tzdata \
+        libconfig9 \
+        openssl \
+        net-tools \
+        iperf \
+        iperf3 \
+        iproute2 \
+        iputils-ping \
+        pciutils \
+        libpcap-dev \
+        xz-utils \
+       libatomic1 \
+        libnuma-dev \
+        gdb \
+        python3 \
+        python3-six \
+        python3-requests \
+        libusb-1.0-0 \
+        libyaml-cpp-dev \
+        libnanomsg5 && \
+    /bin/bash -c 'if [[ "$BUILD_OPTION" = "--sanitize" ]]; then DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+        libasan8 \
+        libubsan1; fi' && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/oai-gnb/bin
+COPY --from=ran-build \
+    /oai-ran/cmake_targets/ran_build/build/nr-softmodem ./
+COPY ./docker/scripts/gnb_entrypoint.sh ./entrypoint.sh
+COPY ./docker/scripts/check-prach-io.sh ./check-prach-io.sh
+
+# OAI shared libraries – both USRP (UHD) and FHI 7.2 transports
+COPY --from=ran-build \
+    /oai-ran/cmake_targets/ran_build/build/liboai_transpro.so \
+    /oai-ran/cmake_targets/ran_build/build/librfsimulator.so \
+    /oai-ran/cmake_targets/ran_build/build/liboai_usrpdevif.so \
+    /oai-ran/cmake_targets/ran_build/build/liboran_fhlib_5g.so \
+    /oai-ran/cmake_targets/ran_build/build/libcoding.so \
+    /oai-ran/cmake_targets/ran_build/build/libparams_libconfig.so \
+    /oai-ran/cmake_targets/ran_build/build/libdfts.so \
+    /oai-ran/cmake_targets/ran_build/build/libldpc*.so \
+    /oai-ran/cmake_targets/ran_build/build/libparams_yaml.so \
+    /usr/local/lib/
+
+# UHD runtime files from the base stage (USRP support)
+COPY --from=ran-base /usr/local/bin/uhd_find_devices /usr/local/bin
+COPY --from=ran-base /usr/local/lib/libuhd.so.4.10.0 /usr/local/lib
+COPY --from=ran-base /usr/local/lib/uhd/utils/uhd_images_downloader.py /opt/oai-gnb/bin
+
+# BLIS multi-threaded library (source-built with multi-config in ran-base;
+# runtime-dispatched so the image is portable across x86_64 and arm64 CPUs).
+COPY --from=ran-base /usr/local/lib/libblis-mt.so* /usr/local/lib/
+
+# Arm-only: pull ArmRAL shared libs from ran-base (no-op on amd64)
+RUN --mount=from=ran-base,source=/usr/local,target=/base,ro \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        cp -P /base/lib/libarmral* /usr/local/lib/; \
+    fi
+
+## libxran (O-RAN FHI 7.2)
+COPY --from=ran-build \
+    /opt/phy/fhi_lib/lib/build/libxran.so \
+    /opt/phy/fhi_lib/lib/build/
+
+## DPDK libraries (required by liboran_fhlib_5g.so).
+## meson installs under the Debian multiarch triplet, which differs per arch.
+RUN --mount=from=ran-build,source=/usr/local/lib,target=/base,ro \
+    case "$TARGETARCH" in \
+        amd64) triplet=x86_64-linux-gnu ;; \
+        arm64) triplet=aarch64-linux-gnu ;; \
+        *)     echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac && \
+    mkdir -p /usr/local/lib/$triplet && \
+    cp -a /base/$triplet/. /usr/local/lib/$triplet/
+
+## E2 SM models
+COPY --from=ran-build /usr/local/lib/flexric /usr/local/lib/flexric
+
+RUN /bin/bash -c "ln -sf /usr/local/lib/liboai_usrpdevif.so /usr/local/lib/liboai_device.so" && \
+    ldconfig && \
+    echo "---- ldd on nr-softmodem ----" && \
+    ldd /opt/oai-gnb/bin/nr-softmodem && \
+    echo "---- ldd on shared libraries ----" && \
+    ldd /usr/local/lib/liboai_transpro.so \
+        /usr/local/lib/librfsimulator.so \
+        /usr/local/lib/liboai_usrpdevif.so \
+        /usr/local/lib/liboran_fhlib_5g.so \
+        /usr/local/lib/libcoding.so \
+        /usr/local/lib/libparams_libconfig.so \
+        /usr/local/lib/libdfts.so \
+        /usr/local/lib/libldpc*.so \
+        /usr/local/lib/libuhd.so.4.10.0 \
+        /opt/phy/fhi_lib/lib/build/libxran.so
+
+WORKDIR /opt/oai-gnb
+
+COPY --from=ran-base /usr/local/bin/yq /usr/local/bin/yq
+COPY --from=ran-base /tini /tini
+ENTRYPOINT ["/tini", "-v", "--", "/opt/oai-gnb/bin/entrypoint.sh"]
+CMD ["/opt/oai-gnb/bin/nr-softmodem"]

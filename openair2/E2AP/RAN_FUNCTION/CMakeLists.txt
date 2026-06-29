@@ -1,43 +1,45 @@
 # SPDX-License-Identifier: LicenseRef-CSSL-1.0
 
 set(UE_ID_COMMON_E2SM_SRCS
-  ../flexric/src/sm/rc_sm/ie/asn/AMFPointer.c
-  ../flexric/src/sm/rc_sm/ie/asn/AMFRegionID.c
-  ../flexric/src/sm/rc_sm/ie/asn/AMFSetID.c
-  ../flexric/src/sm/rc_sm/ie/asn/AMF-UE-NGAP-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/ENB-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/ENB-UE-X2AP-ID-Extension.c
-  ../flexric/src/sm/rc_sm/ie/asn/ENB-UE-X2AP-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GlobalENB-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GlobalGNB-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GlobalNgENB-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GlobalNGRANNodeID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GNB-CU-CP-UE-E1AP-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GNB-CU-UE-F1AP-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GNB-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/GUAMI.c
-  ../flexric/src/sm/rc_sm/ie/asn/GUMMEI.c
-  ../flexric/src/sm/rc_sm/ie/asn/MME-Code.c
-  ../flexric/src/sm/rc_sm/ie/asn/MME-Group-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/MME-UE-S1AP-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/NGENB-CU-UE-W1AP-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/NgENB-ID.c
-  ../flexric/src/sm/rc_sm/ie/asn/NG-RANnodeUEXnAPID.c
-  ../flexric/src/sm/rc_sm/ie/asn/PLMNIdentity.c
-  ../flexric/src/sm/rc_sm/ie/asn/RANUEID.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-ENB.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-EN-GNB.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-GNB-CU-CP-E1AP-ID-Item.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-GNB-CU-CP-E1AP-ID-List.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-GNB-CU-CP-F1AP-ID-Item.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-GNB-CU-F1AP-ID-List.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-GNB-CU-UP.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-GNB-DU.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-GNB.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-NG-ENB-DU.c
-  ../flexric/src/sm/rc_sm/ie/asn/UEID-NG-ENB.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/AMFPointer.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/AMFRegionID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/AMFSetID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/AMF-UE-NGAP-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/ENB-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/ENB-UE-X2AP-ID-Extension.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/ENB-UE-X2AP-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GlobalENB-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GlobalGNB-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GlobalNgENB-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GlobalNGRANNodeID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GNB-CU-CP-UE-E1AP-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GNB-CU-UE-F1AP-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GNB-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GUAMI.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/GUMMEI.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/MME-Code.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/MME-Group-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/MME-UE-S1AP-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/NGENB-CU-UE-W1AP-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/NgENB-ID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/NG-RANnodeUEXnAPID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/PLMNIdentity.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/RANUEID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-ENB.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-EN-GNB.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-GNB-CU-CP-E1AP-ID-Item.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-GNB-CU-CP-E1AP-ID-List.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-GNB-CU-CP-F1AP-ID-Item.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-GNB-CU-F1AP-ID-List.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-GNB-CU-UP.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-GNB-DU.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-GNB.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-NG-ENB-DU.c
+  ${FLEXRIC_DIR}/src/sm/rc_sm/ie/asn/UEID-NG-ENB.c
 )
+
+include_directories(${FLEXRIC_DIR}/test/rnd)
 
 add_library(e2_ran_func_cuup STATIC
             ${UE_ID_COMMON_E2SM_SRCS}
@@ -48,11 +50,11 @@ add_library(e2_ran_func_cuup STATIC
             O-RAN/ran_func_kpm_subs.c
             O-RAN/ran_func_rc.c
             O-RAN/ran_func_rc_subs.c
-            ../flexric/src/sm/rc_sm/ie/rc_data_ie.c
+            ${FLEXRIC_DIR}/src/sm/rc_sm/ie/rc_data_ie.c
             CUSTOMIZED/ran_func_gtp.c    # GTP SM not yet implemented in CU-UP
             CUSTOMIZED/ran_func_pdcp.c
             CUSTOMIZED/ran_func_tc.c     # currently, not implemented; therefore, filling rnd data
-            ../flexric/test/rnd/fill_rnd_data_tc.c
+            ${FLEXRIC_DIR}/test/rnd/fill_rnd_data_tc.c
             )
 
 target_link_libraries(e2_ran_func_cuup PUBLIC asn1_nr_rrc nr_rrc asn1_nr_rrc_hdrs e2_time_obj kpm_ric_info_common_obj kpm_ric_info_obj 3gpp_derived_ie_obj e2sm_rc_ir_obj sm_common_ie_obj ds alg sm_common_enc_asn_obj_rc 3gpp_derived_ie_enc_asn_obj_rc)
@@ -68,15 +70,15 @@ add_library(e2_ran_func_du_cucp_cuup STATIC
             O-RAN/ran_func_kpm_subs.c
             O-RAN/ran_func_rc.c
             O-RAN/ran_func_rc_subs.c
-            ../flexric/src/sm/rc_sm/ie/rc_data_ie.c
+            ${FLEXRIC_DIR}/src/sm/rc_sm/ie/rc_data_ie.c
             CUSTOMIZED/ran_func_gtp.c
             CUSTOMIZED/ran_func_pdcp.c
             CUSTOMIZED/ran_func_mac.c
             CUSTOMIZED/ran_func_rlc.c
             CUSTOMIZED/ran_func_slice.c  # currently, not implemented; therefore, filling rnd data
-            ../flexric/test/rnd/fill_rnd_data_slice.c
+            ${FLEXRIC_DIR}/test/rnd/fill_rnd_data_slice.c
             CUSTOMIZED/ran_func_tc.c     # currently, not implemented; therefore, filling rnd data
-            ../flexric/test/rnd/fill_rnd_data_tc.c
+            ${FLEXRIC_DIR}/test/rnd/fill_rnd_data_tc.c
             )
 
 target_link_libraries(e2_ran_func_du_cucp_cuup PUBLIC asn1_nr_rrc nr_rrc asn1_nr_rrc_hdrs e2_time_obj kpm_ric_info_common_obj kpm_ric_info_obj 3gpp_derived_ie_obj e2sm_rc_ir_obj sm_common_ie_obj ds sm_common_enc_asn_obj_rc 3gpp_derived_ie_enc_asn_obj_rc)

@@ -1,0 +1,132 @@
+image:
+  name: ubuntu:noble
+
+pipelines:
+  branches:
+    integration:
+      - parallel:
+          - step:
+              name: Build and Push gNB (amd64)
+              runs-on:
+                - 'self.hosted'
+                - 'linux.shell'
+                - '26.shell'
+              script:
+                - git submodule update --init --recursive
+                - cd openair2/E2AP/flexric && if [ -n "$BITBUCKET_TAG" ]; then git fetch --tags origin; git checkout "$BITBUCKET_TAG"; else git fetch origin integration; git checkout integration; git reset --hard origin/integration; fi && cd -
+                - docker pull ubuntu:jammy
+                - export IMAGE_TAG=$(echo "$BITBUCKET_BRANCH" | tr '/' '_')
+                - export IMAGE_NAME=nexus.allbesmart.pro/oaibox/x86_64/ai-ran/gnb:$IMAGE_TAG
+                - docker build --no-cache -t $IMAGE_NAME -f docker/Dockerfile.gNB.oaibox .
+                - echo $DOCKER_PASSWORD | docker login nexus.allbesmart.pro --username $DOCKER_USERNAME --password-stdin
+                - docker push $IMAGE_NAME
+
+          - step:
+              name: Build and Push gNB (arm64)
+              runs-on:
+                - 'self.hosted'
+                - 'linux.shell'
+                - 'spark.shell'
+              script:
+                - git submodule update --init --recursive
+                - cd openair2/E2AP/flexric && if [ -n "$BITBUCKET_TAG" ]; then git fetch --tags origin; git checkout "$BITBUCKET_TAG"; else git fetch origin integration; git checkout integration; git reset --hard origin/integration; fi && cd -
+                - docker pull ubuntu:jammy
+                - export IMAGE_TAG=$(echo "$BITBUCKET_BRANCH" | tr '/' '_')
+                - export IMAGE_NAME=nexus.allbesmart.pro/oaibox/aarch64/ai-ran/gnb:$IMAGE_TAG
+                - docker build --no-cache -t $IMAGE_NAME -f docker/Dockerfile.gNB.oaibox .
+                - echo $DOCKER_PASSWORD | docker login nexus.allbesmart.pro --username $DOCKER_USERNAME --password-stdin
+                - docker push $IMAGE_NAME
+
+      - step:
+          name: Push gNB multi-arch manifest
+          runs-on:
+            - 'self.hosted'
+            - 'linux.shell'
+            - '26.shell'
+          script:
+            - export IMAGE_TAG=$(echo "$BITBUCKET_BRANCH" | tr '/' '_')
+            - echo $DOCKER_PASSWORD | docker login nexus.allbesmart.pro --username $DOCKER_USERNAME --password-stdin
+            - >
+              docker buildx imagetools create
+              -t nexus.allbesmart.pro/oaibox/ai-ran/gnb:$IMAGE_TAG
+              nexus.allbesmart.pro/oaibox/x86_64/ai-ran/gnb:$IMAGE_TAG
+              nexus.allbesmart.pro/oaibox/aarch64/ai-ran/gnb:$IMAGE_TAG
+
+  pull-requests:
+    '**':
+      - parallel:
+          - step:
+              name: Build gNB (amd64)
+              runs-on:
+                - 'self.hosted'
+                - 'linux.shell'
+                - '26.shell'
+              script:
+                - git submodule update --init --recursive
+                - cd openair2/E2AP/flexric && if [ -n "$BITBUCKET_TAG" ]; then git fetch --tags origin; git checkout "$BITBUCKET_TAG"; else git fetch origin integration; git checkout integration; git reset --hard origin/integration; fi && cd -
+                - docker pull ubuntu:jammy
+                - export IMAGE_NAME=nexus.allbesmart.pro/oaibox/x86_64/ai-ran/gnb:$(echo "$BITBUCKET_BRANCH" | tr '/' '_')
+                - docker build --no-cache -t $IMAGE_NAME -f docker/Dockerfile.gNB.oaibox .
+
+          - step:
+              name: Build gNB (arm64)
+              runs-on:
+                - 'self.hosted'
+                - 'linux.shell'
+                - 'spark.shell'
+              script:
+                - git submodule update --init --recursive
+                - cd openair2/E2AP/flexric && if [ -n "$BITBUCKET_TAG" ]; then git fetch --tags origin; git checkout "$BITBUCKET_TAG"; else git fetch origin integration; git checkout integration; git reset --hard origin/integration; fi && cd -
+                - docker pull ubuntu:jammy
+                - export IMAGE_NAME=nexus.allbesmart.pro/oaibox/aarch64/ai-ran/gnb:$(echo "$BITBUCKET_BRANCH" | tr '/' '_')
+                - docker build --no-cache -t $IMAGE_NAME -f docker/Dockerfile.gNB.oaibox .
+
+  tags:
+    '*':
+      - parallel:
+          - step:
+              name: Build and Push gNB (amd64)
+              runs-on:
+                - 'self.hosted'
+                - 'linux.shell'
+                - '26.shell'
+              script:
+                - git submodule update --init --recursive
+                - cd openair2/E2AP/flexric && if [ -n "$BITBUCKET_TAG" ]; then git fetch --tags origin; git checkout "$BITBUCKET_TAG"; else git fetch origin integration; git checkout integration; git reset --hard origin/integration; fi && cd -
+                - docker pull ubuntu:jammy
+                - export IMAGE_TAG=$BITBUCKET_TAG
+                - export IMAGE_NAME=nexus.allbesmart.pro/oaibox/x86_64/ai-ran/gnb:$IMAGE_TAG
+                - docker build --no-cache -t $IMAGE_NAME -f docker/Dockerfile.gNB.oaibox .
+                - echo $DOCKER_PASSWORD | docker login nexus.allbesmart.pro --username $DOCKER_USERNAME --password-stdin
+                - docker push $IMAGE_NAME
+
+          - step:
+              name: Build and Push gNB (arm64)
+              runs-on:
+                - 'self.hosted'
+                - 'linux.shell'
+                - 'spark.shell'
+              script:
+                - git submodule update --init --recursive
+                - cd openair2/E2AP/flexric && if [ -n "$BITBUCKET_TAG" ]; then git fetch --tags origin; git checkout "$BITBUCKET_TAG"; else git fetch origin integration; git checkout integration; git reset --hard origin/integration; fi && cd -
+                - docker pull ubuntu:jammy
+                - export IMAGE_TAG=$BITBUCKET_TAG
+                - export IMAGE_NAME=nexus.allbesmart.pro/oaibox/aarch64/ai-ran/gnb:$IMAGE_TAG
+                - docker build --no-cache -t $IMAGE_NAME -f docker/Dockerfile.gNB.oaibox .
+                - echo $DOCKER_PASSWORD | docker login nexus.allbesmart.pro --username $DOCKER_USERNAME --password-stdin
+                - docker push $IMAGE_NAME
+
+      - step:
+          name: Push gNB multi-arch manifest
+          runs-on:
+            - 'self.hosted'
+            - 'linux.shell'
+            - '26.shell'
+          script:
+            - export IMAGE_TAG=$BITBUCKET_TAG
+            - echo $DOCKER_PASSWORD | docker login nexus.allbesmart.pro --username $DOCKER_USERNAME --password-stdin
+            - >
+              docker buildx imagetools create
+              -t nexus.allbesmart.pro/oaibox/ai-ran/gnb:$IMAGE_TAG
+              nexus.allbesmart.pro/oaibox/x86_64/ai-ran/gnb:$IMAGE_TAG
+              nexus.allbesmart.pro/oaibox/aarch64/ai-ran/gnb:$IMAGE_TAG

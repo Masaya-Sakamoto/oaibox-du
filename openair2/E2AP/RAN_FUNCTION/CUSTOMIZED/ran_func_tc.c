@@ -3,7 +3,7 @@
  */
 
 #include "ran_func_tc.h"
-#include "../../flexric/test/rnd/fill_rnd_data_tc.h"
+#include "fill_rnd_data_tc.h"
 #include <assert.h>
 
 bool read_tc_sm(void* data)

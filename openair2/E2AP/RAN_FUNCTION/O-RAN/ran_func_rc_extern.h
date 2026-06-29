@@ -6,9 +6,9 @@
 #define RAN_FUNC_SM_RAN_CTRL_EXTERN_AGENT_H
 
 #include "openair2/RRC/NR/nr_rrc_defs.h"
-#include "openair2/E2AP/flexric/src/lib/3gpp/ie/rrc_msg_id.h"
-#include "openair2/E2AP/flexric/src/lib/3gpp/ie/network_interface_type.h"
-#include "openair2/E2AP/flexric/src/sm/rc_sm/ie/ir/rrc_state.h"
+#include "lib/3gpp/ie/rrc_msg_id.h"
+#include "lib/3gpp/ie/network_interface_type.h"
+#include "sm/rc_sm/ie/ir/rrc_state.h"
 
 void signal_rrc_msg(const nr_rrc_class_e nr_channel, const uint32_t rrc_msg_id, const byte_array_t rrc_ba);
 

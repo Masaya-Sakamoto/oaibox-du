@@ -779,6 +779,14 @@ static int ngap_gNB_generate_ng_setup_request(
   ie->value.choice.PagingDRX = instance_p->default_drx;
   asn1cSeqAdd(&out->protocolIEs.list, ie);
 
+  /* optional */
+  ie = calloc(1, sizeof(*ie));
+  AssertFatal(ie != NULL, "out of memory\n");
+  ie->id = NGAP_ProtocolIE_ID_id_UERetentionInformation	;
+  ie->criticality = NGAP_Criticality_ignore;
+  ie->value.present = NGAP_NGSetupRequestIEs__value_PR_UERetentionInformation;
+  ie->value.choice.UERetentionInformation = NGAP_UERetentionInformation_ues_retained;
+  asn1cSeqAdd(&out->protocolIEs.list, ie);
 
   if (ngap_gNB_encode_pdu(&pdu, &buffer, &len) < 0) {
     NGAP_ERROR("Failed to encode NG setup request\n");

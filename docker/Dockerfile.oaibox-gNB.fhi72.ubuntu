@@ -1,0 +1,229 @@
+#/*
+# * Licensed to the OpenAirInterface (OAI) Software Alliance under one or more
+# * contributor license agreements.  See the NOTICE file distributed with
+# * this work for additional information regarding copyright ownership.
+# * The OpenAirInterface Software Alliance licenses this file to You under
+# * the OAI Public License, Version 1.1  (the "License"); you may not use this file
+# * except in compliance with the License.
+# * You may obtain a copy of the License at
+# *
+# *      http://www.openairinterface.org/?page_id=698
+# *
+# * Unless required by applicable law or agreed to in writing, software
+# * distributed under the License is distributed on an "AS IS" BASIS,
+# * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# * See the License for the specific language governing permissions and
+# * limitations under the License.
+# *-------------------------------------------------------------------------------
+# * For more information about the OpenAirInterface (OAI) Software Alliance:
+# *      contact@openairinterface.org
+# */
+#---------------------------------------------------------------------
+#
+# Single multi-stage Dockerfile for Converge gNB (FHI 7.2)
+#   Valid for Ubuntu 24.04
+#
+# Build:
+#   docker build -t <image>:<tag> -f docker/Dockerfile.converge-gnb.ubuntu .
+#
+#---------------------------------------------------------------------
+
+ARG UBUNTU_IMAGE=ubuntu:noble
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 1: base – build tools only, no SDR hardware drivers
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ${UBUNTU_IMAGE} AS ran-base
+
+ARG NEEDED_GIT_PROXY
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    apt-get install --yes \
+        build-essential \
+        ccache \
+        psmisc \
+        git \
+        xxd \
+        libpcre2-dev \
+        python3-dev \
+        bison \
+        flex \
+        m4 \
+        libzstd-dev \
+        python3-pip \
+        wget \
+        flatbuffers-compiler \
+        libflatbuffers-dev \
+        libnanomsg-dev && \
+    pip3 install --ignore-installed pyyaml --break-system-packages
+
+# Tini – tiny init for containers
+ENV TINI_VERSION=v0.19.0
+RUN wget https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TARGETARCH} -O /tini && \
+    chmod +x /tini
+
+ENV YQ_VERSION=v4.2.0
+RUN wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${TARGETARCH} -O /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+RUN /bin/bash -c "if [[ -v NEEDED_GIT_PROXY ]]; then git config --global http.proxy $NEEDED_GIT_PROXY; fi"
+
+WORKDIR /oai-ran/cmake_targets/tools
+COPY cmake_targets/tools/build_helper \
+     cmake_targets/tools/uhd-4.x-tdd-patch.diff \
+     ./
+
+WORKDIR /oai-ran/cmake_targets
+COPY cmake_targets/build_oai .
+
+WORKDIR /oai-ran
+COPY oaienv .
+
+# Install build dependencies – no SDR hardware drivers (no USRP/UHD/BladeRF)
+RUN /bin/sh oaienv && \
+    cd cmake_targets && \
+    mkdir -p log && \
+    ./build_oai -I
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 2: build – DPDK + FHI 7.2 library + OAI gNB + FlexRIC
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ran-base AS ran-build-fhi72
+
+ARG E2AP_VERSION=E2AP_V3
+ARG KPM_VERSION=KPM_V3_00
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe
+
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    apt-get install --yes \
+        meson \
+        wget \
+        xz-utils \
+        pkg-config \
+        libnuma-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN rm -Rf /oai-ran
+WORKDIR /oai-ran
+COPY . .
+
+## Download and build DPDK
+RUN wget http://fast.dpdk.org/rel/dpdk-20.11.9.tar.xz && \
+    tar -xvf dpdk-20.11.9.tar.xz && \
+    cd dpdk-stable-20.11.9 && \
+    meson build && \
+    ninja -C build && \
+    ninja install -C build
+
+## Build Fronthaul library
+RUN git clone https://gerrit.o-ran-sc.org/r/o-du/phy.git /opt/phy && \
+    cd /opt/phy && \
+    git checkout oran_f_release_v1.0 && \
+    git apply /oai-ran/cmake_targets/tools/oran_fhi_integration_patches/F/oaioran_F.patch && \
+    cd /opt/phy/fhi_lib/lib && \
+    WIRELESS_SDK_TOOLCHAIN=gcc RTE_SDK=/oai-ran/dpdk-stable-20.11.9/ XRAN_DIR=/opt/phy/fhi_lib make XRAN_LIB_SO=1
+
+## Build OAI gNB
+RUN /bin/sh oaienv && \
+    cd cmake_targets && \
+    mkdir -p log && \
+    ./build_oai \
+        --ninja --gNB \
+        -t oran_fhlib_5g --cmake-opt -Dxran_LOCATION=/opt/phy/fhi_lib/lib \
+        --build-e2 --cmake-opt -DKPM_VERSION=$KPM_VERSION --cmake-opt -DE2AP_VERSION=$E2AP_VERSION && \
+    ldd ran_build/build/nr-softmodem && \
+    ldd ran_build/build/liboran_fhlib_5g.so && \
+    ldd /opt/phy/fhi_lib/lib/build/libxran.so
+
+## Build FlexRIC SM models
+RUN mkdir -p openair2/E2AP/flexric/build && \
+    cd openair2/E2AP/flexric/build && \
+    cmake -GNinja -DCMAKE_BUILD_TYPE=Release \
+          -DKPM_VERSION=$KPM_VERSION \
+          -DE2AP_VERSION=$E2AP_VERSION .. && \
+    ninja && \
+    ninja install
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 3: runtime – minimal production image, no debug tools
+# ──────────────────────────────────────────────────────────────────────────────
+FROM ${UBUNTU_IMAGE} AS oai-gnb
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe
+
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    apt-get install --yes \
+        software-properties-common \
+        procps \
+        pkg-config \
+        libsctp1 \
+        tzdata \
+        libconfig9 \
+        openssl \
+        net-tools \
+        iperf \
+        iproute2 \
+        iputils-ping \
+        pciutils \
+        libpcap-dev \
+        xz-utils \
+        libnuma-dev \
+        python3 \
+        python3-six \
+        python3-requests \
+        libyaml-cpp-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/oai-gnb/bin
+COPY --from=ran-build-fhi72 \
+    /oai-ran/cmake_targets/ran_build/build/nr-softmodem ./
+COPY ./docker/scripts/gnb_entrypoint.sh ./entrypoint.sh
+COPY ./docker/scripts/check-prach-io.sh ./check-prach-io.sh
+
+COPY --from=ran-build-fhi72 \
+    /oai-ran/cmake_targets/ran_build/build/librfsimulator.so \
+    /oai-ran/cmake_targets/ran_build/build/liboai_transpro.so \
+    /oai-ran/cmake_targets/ran_build/build/libcoding.so \
+    /oai-ran/cmake_targets/ran_build/build/libparams_libconfig.so \
+    /oai-ran/cmake_targets/ran_build/build/libdfts.so \
+    /oai-ran/cmake_targets/ran_build/build/libldpc*.so \
+    /oai-ran/cmake_targets/ran_build/build/libparams_yaml.so \
+    /usr/local/lib/
+
+## Libxran library
+COPY --from=ran-build-fhi72 \
+    /opt/phy/fhi_lib/lib/build/libxran.so \
+    /opt/phy/fhi_lib/lib/build/
+
+## DPDK libraries (required by liboran_fhlib_5g.so)
+COPY --from=ran-build-fhi72 /usr/local/lib/x86_64-linux-gnu /usr/local/lib/x86_64-linux-gnu/
+
+## E2 SM models
+COPY --from=ran-build-fhi72 /usr/local/lib/flexric /usr/local/lib/flexric
+
+RUN ldconfig && \
+    echo "---- ldd on nr-softmodem ----" && \
+    ldd /opt/oai-gnb/bin/nr-softmodem && \
+    echo "---- ldd on shared libraries ----" && \
+    ldd /usr/local/lib/librfsimulator.so \
+        /usr/local/lib/liboai_transpro.so \
+        /usr/local/lib/libcoding.so \
+        /usr/local/lib/libparams_libconfig.so \
+        /usr/local/lib/libdfts.so \
+        /usr/local/lib/libldpc*.so \
+        /opt/phy/fhi_lib/lib/build/libxran.so
+
+WORKDIR /opt/oai-gnb
+
+COPY --from=ran-base /usr/local/bin/yq /usr/local/bin/yq
+COPY --from=ran-base /tini /tini
+ENTRYPOINT ["/tini", "-v", "--", "/opt/oai-gnb/bin/entrypoint.sh"]
+CMD ["/opt/oai-gnb/bin/nr-softmodem"]

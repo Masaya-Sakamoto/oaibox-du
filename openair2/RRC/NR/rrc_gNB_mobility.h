@@ -73,6 +73,7 @@ typedef struct nr_ho_target_cu {
 typedef struct nr_handover_context_s {
   nr_ho_source_cu_t *source;
   nr_ho_target_cu_t *target;
+  struct timespec ho_start_ts;
 } nr_handover_context_t;
 
 typedef enum { HO_CTX_BOTH, HO_CTX_SOURCE, HO_CTX_TARGET } ho_ctx_type_t;
@@ -100,5 +101,7 @@ bool nr_rrc_update_cell_assoc_after_ho(gNB_RRC_UE_t *UE);
 const nr_neighbour_cell_t *get_neighbour_cell_by_pci(const neighbour_cell_configuration_t *cell, int pci);
 void nr_HO_F1_trigger_telnet(gNB_RRC_INST *rrc, uint32_t rrc_ue_id);
 void nr_HO_N2_trigger_telnet(gNB_RRC_INST *rrc, uint32_t neighbour_pci, uint32_t rrc_ue_id);
+
+void xapp_rrc_init(xapp_t *xapp);
 
 #endif /* RRC_GNB_MOBILITY_H_ */

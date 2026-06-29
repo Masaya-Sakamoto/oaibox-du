@@ -5,7 +5,7 @@
 #ifndef RAN_FUNC_SM_KPM_SUBSCRIPTION_AGENT_H
 #define RAN_FUNC_SM_KPM_SUBSCRIPTION_AGENT_H
 
-#include "openair2/E2AP/flexric/src/sm/kpm_sm/kpm_data_ie_wrapper.h"
+#include "sm/kpm_sm/kpm_data_ie_wrapper.h"
 
 #include "openair2/LAYER2/NR_MAC_gNB/mac_proto.h"
 #include "openair2/LAYER2/nr_pdcp/nr_pdcp_oai_api.h"

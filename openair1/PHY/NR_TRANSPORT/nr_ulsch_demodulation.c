@@ -26,6 +26,33 @@ static void copy_c16_data_to_slot_memory(c16_t *src, c16_t *dst_slot, int nb_re_
 }
 #endif
 
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
+// OAIBOX MOD_SYMBOLS export
+int oaibox_mod_symbols_export_sockfd;
+struct sockaddr_in oaibox_mod_symbols_export_servaddr;
+#define MOD_SYMBOLS_BUFFER_SIZE 65535
+
+static bool mod_symbols_init = 0;
+
+void init_mod_symbols_export()
+{
+  LOG_I(GNB_APP, "OAIBOX: initializing MOD SYMBOLS export\n");
+  if ((oaibox_mod_symbols_export_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    LOG_E(GNB_APP, "OAIBOX: socket creation failed\n");
+    exit(EXIT_FAILURE);
+  }
+  memset(&oaibox_mod_symbols_export_servaddr, 0, sizeof(oaibox_mod_symbols_export_servaddr));
+  oaibox_mod_symbols_export_servaddr.sin_family = AF_INET;
+  oaibox_mod_symbols_export_servaddr.sin_port = htons(get_softmodem_params()->export_mod_symbols_port);
+  oaibox_mod_symbols_export_servaddr.sin_addr.s_addr = inet_addr(get_softmodem_params()->export_mod_symbols_ip);
+}
+
 void nr_idft(int32_t *z, uint32_t Msc_PUSCH)
 {
 
@@ -828,5 +855,42 @@ int nr_rx_pusch_tp(PHY_VARS_gNB *gNB,
   }
   uint32_t total_llrs = total_res * rel15_ul->qam_mod_order * rel15_ul->nrOfLayers;
   gNBscopeCopyWithMetadata(gNB, gNBPuschLlr, pusch_vars->llr, sizeof(c16_t), 1, total_llrs, 0, &mt);
+
+  if (IS_SOFTMODEM_EXPORT_MOD_SYMBOLS_ENABLED) {
+    if (!mod_symbols_init) {
+      mod_symbols_init = true;
+      init_mod_symbols_export();
+    }
+
+    buffer_length = ceil_mod(rel15_ul->rb_size * NR_NB_SC_PER_RB, 16);
+    for (uint8_t symbol = rel15_ul->start_symbol_index; symbol < (rel15_ul->start_symbol_index + rel15_ul->nr_of_symbols);
+         symbol++) {
+      char mod_symbols_buffer[MOD_SYMBOLS_BUFFER_SIZE];
+      char *output = mod_symbols_buffer;
+      const char *end = output + sizeof(mod_symbols_buffer);
+      c16_t *rxdataF_comp = (c16_t *)&pusch_vars->rxdataF_comp[0][symbol * buffer_length + rel15_ul->rb_start * NR_NB_SC_PER_RB];
+
+      output += snprintf(output, end - output, "{\"rnti\": \"%04x\", \"ulQm\": %d, \"modSymbols\": [", rel15_ul->rnti, rel15_ul->qam_mod_order);
+      for (int i = 0; i < pusch_vars->ul_valid_re_per_slot[symbol]; i++) {
+        output += snprintf(output, end - output, "[%d, %d], ", rxdataF_comp[i].r, rxdataF_comp[i].i);
+      }
+      output -= 2;
+      output += snprintf(output, end - output, "]}");
+
+      long mod_symbols_buffer_len = output - mod_symbols_buffer;
+      if (mod_symbols_buffer_len + 1 < MOD_SYMBOLS_BUFFER_SIZE) {
+        sendto(oaibox_mod_symbols_export_sockfd,
+               mod_symbols_buffer,
+               mod_symbols_buffer_len,
+               MSG_DONTWAIT | MSG_NOSIGNAL, // MSG_CONFIRM,
+               (const struct sockaddr *)&oaibox_mod_symbols_export_servaddr,
+               sizeof(oaibox_mod_symbols_export_servaddr));
+        //LOG_I(GNB_APP, "OAIBOX: sending %lu bytes:\n%s\n", mod_symbols_buffer_len, mod_symbols_buffer);
+      } else {
+        LOG_E(GNB_APP, "OAIBOX: Error sending %lu bytes, buffer too small\n", mod_symbols_buffer_len);
+      }
+    }
+  }
+
   return 0;
 }

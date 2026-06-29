@@ -25,6 +25,7 @@
 #define NRUE_RU_TUNE_OFFSET "tune_offset"
 #define NRUE_RU_IF_FREQUENCY "if_freq"
 #define NRUE_RU_IF_FREQ_OFFSET "if_offset"
+#define NRUE_RU_GPIO_CONTROLLER "USRP GPIO controller\n"
 
 #define NRUE_RU_SRC_CHECK                                                                                        \
   &(checkedparam_t)                                                                                              \
@@ -51,6 +52,7 @@
   {NRUE_RU_TUNE_OFFSET,      CONFIG_HLP_TUNE_OFFSET,    0,         .dblptr=NULL, .defdblval=0.0,         TYPE_DOUBLE, 0,      NULL              }, \
   {NRUE_RU_IF_FREQUENCY,     CONFIG_HLP_IF_FREQ,        0,         .u64ptr=NULL, .defint64val=0,         TYPE_UINT64, 0,      NULL              }, \
   {NRUE_RU_IF_FREQ_OFFSET,   CONFIG_HLP_IF_FREQ_OFF,    0,         .iptr=NULL,   .defintval=0,           TYPE_INT,    0,      NULL              }, \
+  {NRUE_RU_GPIO_CONTROLLER,  NRUE_RU_GPIO_CONTROLLER,   0,         .strptr=NULL, .defstrval="none",      TYPE_STRING, 0,      NULL              }, \
 }
 // clang-format on
 
@@ -211,6 +213,17 @@ void nrue_set_ru_params(configmodule_interface_t *cfg)
                                      .if_frequency = get_nrUE_params()->if_freq,
                                      .if_freq_offset = get_nrUE_params()->if_freq_off,
                                      .used_by_cell = -1};
+
+    char *str = get_nrUE_params()->gpio_controller;
+    if (strcmp(str, "none") == 0) {
+      nrue_rus[0].gpio_controller = RU_GPIO_CONTROL_NONE;
+      LOG_I(PHY, "RU GPIO control set as 'none'\n");
+    } else if (strcmp(str, "tmytek") == 0) {
+      nrue_rus[0].gpio_controller = RU_GPIO_CONTROL_TMYTEK;
+      LOG_I(PHY, "RU GPIO control set as 'tmytek'\n");
+    } else {
+      AssertFatal(false, "bad GPIO controller in configuration file: '%s'\n", str);
+    }
     return;
   }
 
@@ -241,6 +254,17 @@ void nrue_set_ru_params(configmodule_interface_t *cfg)
     int time_src_idx = config_paramidx_fromname(RUParams, sizeofArray(RUParams), NRUE_RU_TIME_SRC);
     AssertFatal(time_src_idx >= 0, "Index for time_src config option not found!\n");
     nrue_rus[ru_id].time_source = config_get_processedint(cfg, &RUParamList.paramarray[ru_id][time_src_idx]);
+
+    char *str = strdup(*(gpd(RUParamList.paramarray[ru_id], sizeofArray(RUParams), NRUE_RU_SDR_ADDRS)->strptr));
+    if (strcmp(str, "none") == 0) {
+      nrue_rus[ru_id].gpio_controller = RU_GPIO_CONTROL_NONE;
+      LOG_I(PHY, "RU GPIO control set as 'none'\n");
+    } else if (strcmp(str, "tmytek") == 0) {
+      nrue_rus[ru_id].gpio_controller = RU_GPIO_CONTROL_TMYTEK;
+      LOG_I(PHY, "RU GPIO control set as 'tmytek'\n");
+    } else {
+      AssertFatal(false, "bad GPIO controller in configuration file: '%s'\n", str);
+    }
 
     LOG_I(NR_PHY,
           "RU %d: nb_tx %d, nb_rx %d, att_tx %d, att_rx %d, max_rxgain %d, tune_offset %f, if_frequency %lu, if_freq_offset %d, "
@@ -333,6 +357,7 @@ void nrue_init_openair0(void)
     cfg->clock_source = nrue_rus[ru_id].clock_source;
     cfg->time_source = nrue_rus[ru_id].time_source;
     cfg->tune_offset = nrue_rus[ru_id].tune_offset;
+    cfg->gpio_controller = nrue_rus[ru_id].gpio_controller;
   }
 }
 

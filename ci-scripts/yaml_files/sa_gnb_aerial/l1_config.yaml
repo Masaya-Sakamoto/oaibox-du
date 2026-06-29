@@ -1,0 +1,22 @@
+# Add parameters here to be set in cuphycontroller_{...}.yaml
+# Parameter names ARE case-sensitive, and must match the target parameter name
+
+#aerial_sdk_version: 25-2-cubb
+
+#enable_srs: 0
+#use_batched_memcpy: 0
+#ul_order_timeout_cpu_ns: 8000000
+#ul_srs_aggr3_task_launch_offset_ns: 500000
+#pusch_subSlotProcEn: 1
+#eAxC_id_srs: [8,9,0xa,0xb]
+#dst_mac_addr: 6c:ad:ad:00:0a:78
+#mps_sm_pusch: 40 # 108
+#mps_sm_pucch: 8 # 16
+#mps_sm_prach: 2 # 2
+#mps_sm_pdsch: 30 # 82
+#mps_sm_pdcch: 18 # 36
+#mps_sm_pbch: 18 # 36
+#mps_sm_srs: 8 # 16
+#pusch_prb_stride: 273
+#srs_prb_stride: 273
+#pusch_nMaxPrb: 273

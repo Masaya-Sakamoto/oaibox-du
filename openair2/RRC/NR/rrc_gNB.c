@@ -338,6 +338,7 @@ static void rrc_gNB_CU_DU_init(gNB_RRC_INST *rrc)
     case ngran_gNB_CU:
       mac_rrc_dl_f1ap_init(&rrc->mac_rrc);
       cucp_cuup_message_transfer_direct_init(rrc);
+      xapp_rrc_init(&rrc->xapp);
       break;
     case ngran_gNB:
       mac_rrc_dl_direct_init(&rrc->mac_rrc);
@@ -1684,6 +1685,83 @@ static void process_Periodical_Measurement_Report(gNB_RRC_UE_t *ue_ctxt, NR_Meas
   AssertFatal(id, "unexpected MeasResult for MeasurementId %ld received\n", id);
   asn1cCallocOne(ue_ctxt->measResults, measurementReport->criticalExtensions.choice.measurementReport->measResults);
   /* we "keep" the measurement report, so set to 0 */
+
+  NR_MeasResults_t *measResults = ue_ctxt->measResults;
+  if (measResults->measResultServingMOList.list.count > 0 && measResults->measResultServingMOList.list.array[0] != NULL) {
+    if (measResults != NULL) {
+      if (measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrp) {
+        ue_ctxt->rsrp =
+            *measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrp
+            - 156;
+      }
+      if (measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrq) {
+        ue_ctxt->rsrq = (float)(*measResults->measResultServingMOList.list.array[0]
+                                     ->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrq
+                                - 87)
+                        / 2.0f;
+      }
+      if (measResults->measResultServingMOList.list.array[0]->measResultServingCell.measResult.cellResults.resultsSSB_Cell->sinr) {
+        ue_ctxt->sinr = (float)(*measResults->measResultServingMOList.list.array[0]
+                                     ->measResultServingCell.measResult.cellResults.resultsSSB_Cell->sinr
+                                - 46)
+                        / 2.0f;
+      }
+    }
+  }
+
+  // Print only when there are Neighbour Cells
+  if (measResults->measResultNeighCells
+      && measResults->measResultNeighCells->present == NR_MeasResults__measResultNeighCells_PR_measResultListNR) {
+    DevAssert(measResults->measResultServingMOList.list.count >= 1);
+    if (measResults->measResultServingMOList.list.count > 1)
+      LOG_W(RRC, "Received %d MeasResultServMO, but handling only 1!\n", measResults->measResultServingMOList.list.count);
+
+    printf("measId: %ld\n", id);
+    NR_MeasResultServMO_t *measresultservmo = measResults->measResultServingMOList.list.array[0];
+    NR_MeasResultNR_t *measresultnr = &measresultservmo->measResultServingCell;
+    NR_MeasQuantityResults_t *mqr = measresultnr->measResult.cellResults.resultsSSB_Cell;
+    if (measresultnr->physCellId)
+      printf("    servingCellId %ld MeasResultNR for phyCellId %ld:\n      resultSSB:",
+             measresultservmo->servCellId,
+             *measresultnr->physCellId);
+    if (mqr != NULL) {
+      if (mqr->rsrp) {
+        const long rrsrp = *mqr->rsrp - 156;
+        printf("RSRP %ld dBm ", rrsrp);
+      }
+      if (mqr->rsrq) {
+        const float rrsrq = (float)(*mqr->rsrq - 87) / 2.0f;
+        printf("RSRQ %.1f dB ", rrsrq);
+      }
+      if (mqr->sinr) {
+        const float rsinr = (float)(*mqr->sinr - 46) / 2.0f;
+        printf("SINR %.1f dB ", rsinr);
+      }
+      printf("\n");
+    } else {
+      printf("NOT PROVIDED\n");
+    }
+
+    if (measResults->measResultNeighCells
+        && measResults->measResultNeighCells->present == NR_MeasResults__measResultNeighCells_PR_measResultListNR) {
+      NR_MeasResultListNR_t *meas_neigh = measResults->measResultNeighCells->choice.measResultListNR;
+      for (int i = 0; i < meas_neigh->list.count; ++i) {
+        NR_MeasResultNR_t *measresultneigh = meas_neigh->list.array[i];
+        NR_MeasQuantityResults_t *neigh_mqr = measresultneigh->measResult.cellResults.resultsSSB_Cell;
+        if (measresultneigh->physCellId)
+          printf("    neighboring cell for phyCellId %ld:\n      resultSSB:", *measresultneigh->physCellId);
+        if (mqr != NULL) {
+          const long rrsrp = *neigh_mqr->rsrp - 156;
+          const float rrsrq = (float)(*neigh_mqr->rsrq - 87) / 2.0f;
+          const float rsinr = (float)(*neigh_mqr->sinr - 46) / 2.0f;
+          printf("RSRP %ld dBm RSRQ %.1f dB SINR %.1f dB\n", rrsrp, rrsrq, rsinr);
+        } else {
+          printf("NOT PROVIDED\n");
+        }
+      }
+    }
+  }
+
   free(measurementReport->criticalExtensions.choice.measurementReport);
   measurementReport->criticalExtensions.choice.measurementReport = NULL;
 }
@@ -1702,7 +1780,57 @@ static void process_Event_Based_Measurement_Report(gNB_RRC_INST *rrc,
 
   switch (event_triggered->eventId.present) {
     case NR_EventTriggerConfig__eventId_PR_eventA2:
-      LOG_I(NR_RRC, "HO LOG: Event A2 (Serving becomes worse than threshold)\n");
+      LOG_W(NR_RRC, "HO LOG: Event A2 (Serving becomes worse than threshold)\n");
+      const NR_MeasResults_t *measResults = &measurementReport->criticalExtensions.choice.measurementReport->measResults;
+
+      for (int serving_cell_idx = 0; serving_cell_idx < measResults->measResultServingMOList.list.count; serving_cell_idx++) {
+        const NR_MeasResultServMO_t *meas_result_serv_MO = measResults->measResultServingMOList.list.array[serving_cell_idx];
+        scell_pci = *(meas_result_serv_MO->measResultServingCell.physCellId);
+        if (meas_result_serv_MO->measResultServingCell.measResult.cellResults.resultsSSB_Cell) {
+          servingCellRSRP = *(meas_result_serv_MO->measResultServingCell.measResult.cellResults.resultsSSB_Cell->rsrp) - 157;
+        } else {
+          servingCellRSRP = *(meas_result_serv_MO->measResultServingCell.measResult.cellResults.resultsCSI_RS_Cell->rsrp) - 157;
+        }
+        LOG_I(NR_RRC, "Serving Cell %d RSRP: %d\n", scell_pci, servingCellRSRP);
+      }
+
+      // Do nothing, for now, on Event A2
+      /*
+      // Resolve source cell by PCI from UE's serving cells
+      const nr_rrc_cell_container_t *source_cell = NULL;
+      FOR_EACH_SEQ_ARR (ue_serving_cell_t *, scell, &ue->serving_cells) {
+        nr_rrc_cell_container_t *cell_by_id = get_cell_by_cell_id(&rrc->cells, scell->nci);
+        if (cell_by_id != NULL && cell_by_id->info.pci == scell_pci) {
+          source_cell = cell_by_id;
+          break;
+        }
+      }
+      if (source_cell == NULL) {
+        LOG_W(NR_RRC,
+              "UE %d: received measurement report but source cell with PCI %d not found in UE's serving cells, skipping\n",
+              ue->rrc_ue_id,
+              scell_pci);
+        break;
+      }
+
+      // Implement a criterion to select the neighboring cell
+      nr_neighbour_cell_t *target_neighbour = NULL;
+      const neighbour_cell_configuration_t *neighbour_config = get_neighbour_cell_config(rrc, source_cell->info.cell_id);
+      const seq_arr_t *neighbour_cells = neighbour_config ? &neighbour_config->neighbour_cells : NULL;
+      FOR_EACH_SEQ_ARR (nr_neighbour_cell_t *, neighbour, neighbour_cells) {
+        if (scell_pci != neighbour->physicalCellId)
+          target_neighbour = neighbour;
+      }
+      if (!target_neighbour) {
+        LOG_E(NR_RRC, "No neighboring cells found!\n");
+        break;
+      }
+
+      const nr_rrc_cell_container_t *target_cell = get_cell_by_cell_id(&rrc->cells, target_neighbour->nrcell_id);
+
+      nr_rrc_trigger_f1_ho(rrc, ue, source_cell, target_cell);
+      */
+
       break;
 
     case NR_EventTriggerConfig__eventId_PR_eventA3: {
@@ -2155,7 +2283,12 @@ static void handle_rrcReconfigurationComplete(gNB_RRC_INST *rrc, gNB_RRC_UE_t *U
   }
 
   if (UE->ho_context != NULL) {
-    LOG_A(NR_RRC, "handover for UE %d/RNTI %04x complete!\n", UE->rrc_ue_id, UE->rnti);
+    struct timespec ho_end_ts;
+    clock_gettime(CLOCK_REALTIME, &ho_end_ts);
+    UE->ho_elapsed_ms = (ho_end_ts.tv_sec - UE->ho_context->ho_start_ts.tv_sec) * 1000.0
+                        + (ho_end_ts.tv_nsec - UE->ho_context->ho_start_ts.tv_nsec) / 1000000.0;
+
+    LOG_A(NR_RRC, "Handover for UE %d/RNTI %04x complete in %.3f milliseconds!\n", UE->rrc_ue_id, UE->rnti, UE->ho_elapsed_ms);
     DevAssert(UE->ho_context->target != NULL);
 
     UE->ho_context->target->ho_success(rrc, UE);
@@ -2732,8 +2865,10 @@ static void rrc_delete_ue_data(gNB_RRC_UE_t *UE)
   ASN_STRUCT_FREE(asn_DEF_NR_UE_NR_Capability, UE->UE_Capability_nr);
   free_byte_array(UE->mcg);
   ASN_STRUCT_FREE(asn_DEF_NR_MeasResults, UE->measResults);
+  UE->measResults = NULL;
   FREE_AND_ZERO_BYTE_ARRAY(UE->ue_cap_buffer);
   free_MeasConfig(UE->measConfig);
+  UE->measConfig = NULL;
   free(UE->redcap_cap);
   UE->redcap_cap = NULL;
   seq_arr_free(&UE->pduSessions, free_pdusession);

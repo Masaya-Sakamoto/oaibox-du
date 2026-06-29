@@ -287,3 +287,24 @@ void openair0_write_reorder_clear_context(openair0_device_t *device)
   ctx->initDone = false;
   pthread_mutex_unlock(&ctx->mutex_store);
 }
+
+int extract_sdr_param(const char *sdr_addrs, const char *key, char *output_buffer, size_t buffer_size)
+{
+  const char *p;
+  char format[16];
+
+  if (sdr_addrs == NULL || output_buffer == NULL) {
+    return 0;
+  }
+
+  p = strstr(sdr_addrs, key);
+  if (p) {
+    p += strlen(key);
+    snprintf(format, sizeof(format), "%%%zu[^\n,]", buffer_size - 1);
+
+    if (sscanf(p, format, output_buffer) == 1) {
+      return 1;
+    }
+  }
+  return 0;
+}

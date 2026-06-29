@@ -777,7 +777,7 @@ static NR_SRS_ResourceSet_t *get_srs_resourceset(const int resset_id,
   srs_resset->alpha = calloc_or_fail(1, sizeof(*srs_resset->alpha));
   *srs_resset->alpha = NR_Alpha_alpha1;
   srs_resset->p0 = calloc_or_fail(1, sizeof(*srs_resset->p0));
-  *srs_resset->p0 = -80;
+  *srs_resset->p0 = -90;
   srs_resset->pathlossReferenceRS = NULL;
   srs_resset->srs_PowerControlAdjustmentStates = NULL;
   return srs_resset;
@@ -1249,7 +1249,10 @@ static void config_pucch_resset0(const NR_ServingCellConfigCommon_t *scc,
   NR_PUCCH_Resource_t *pucchres0 = calloc(1,sizeof(*pucchres0));
   pucchres0->pucch_ResourceId = *pucchid;
   int num_pucch2 = get_nb_pucch2_per_slot(scc, curr_bwp, ap);
-  pucchres0->startingPRB = (pucch2_size * num_pucch2) + uid;
+  pucchres0->startingPRB = (pucch2_size * num_pucch2 + 2) + (uid * 2);
+  if (pucchres0->startingPRB >= curr_bwp) {
+    pucchres0->startingPRB = (pucchres0->startingPRB % curr_bwp) + (pucch2_size * num_pucch2 + 3) - (curr_bwp % 2);
+  }
   // checked for validity in verify_radio_configuration
   AssertFatal(pucchres0->startingPRB < curr_bwp, "Not enough resources in current BWP (size %d) to allocate uid %d\n", curr_bwp, uid);
   pucchres0->intraSlotFrequencyHopping = NULL;

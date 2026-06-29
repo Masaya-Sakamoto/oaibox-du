@@ -436,7 +436,7 @@ typedef enum {
   {                                                                                                                               \
         {MEASUREMENT_EVENT_ENABLE, "enable the event", 0, .i64ptr = NULL, .defint64val = 1, TYPE_INT64, 0}, \
         {MEASUREMENT_EVENTS_TIME_TO_TRIGGER, "a2 time to trigger", 0, .i64ptr = NULL, .defint64val = 1, TYPE_INT64, 0}, \
-        {MEASUREMENT_EVENTS_THRESHOLD, "a2 threshold", 0, .i64ptr = NULL, .defint64val = 60, TYPE_INT64, 0},            \
+        {MEASUREMENT_EVENTS_THRESHOLD, "a2 threshold", 0, .i64ptr = NULL, .defint64val = 37, TYPE_INT64, 0},            \
   }
 
 #define MEASUREMENT_PERIODICAL_GLOBALPARAMS_DESC                                                                                      \
@@ -1043,7 +1043,7 @@ typedef enum {
           .setintval = { VALUES_NR_PDCP_SN_SIZE }, \
           .num_okstrval = SIZEOF_NR_PDCP_SN_SIZE }}}, \
     { .optname = CONFIG_NR_PDCP_T_REORDERING, \
-      .defstrval = "ms100", \
+      .defstrval = "ms1000", \
       .helpstr = "reordering timer", .paramflags = 0, .strptr = NULL, .type = TYPE_STRING, .numelt = 0, \
       .chkPptr = &(checkedparam_t){ .s3a = { .f3a = config_checkstr_assign_integer, \
           .okstrval = { VALUES_NR_PDCP_T_REORDERING_STR }, \

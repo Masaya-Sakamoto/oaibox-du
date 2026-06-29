@@ -254,6 +254,7 @@ typedef struct {
   uint64_t if_frequency;
   int if_freq_offset;
   int used_by_cell;
+  gpio_control_t gpio_controller;
 } nrUE_RU_params_t;
 
 typedef struct {

@@ -49,6 +49,7 @@ static int DEFRUTPCORES[] = {-1,-1,-1,-1};
 #include "nfapi_interface.h"
 #include <nfapi/oai_integration/vendor_ext.h>
 #include "executables/nr-softmodem-common.h"
+#include <cblas.h>
 
 static void NRRCconfig_RU(configmodule_interface_t *cfg);
 
@@ -338,6 +339,15 @@ void fh_if4p5_north_out(RU_t *ru)
   stop_meas(&ru->tx_fhaul);
 }
 
+// Noise reader
+static void noise_reader(RU_t *ru, cf_t *ret_noise, int nsamps, int nb_antennas)
+{
+  cf_t *noise_1d = (cf_t *)ret_noise;
+  pthread_mutex_lock(&ru->proc.mutex_noise);
+  memset(noise_1d, 0, nsamps * nb_antennas * sizeof(cf_t));
+  pthread_mutex_unlock(&ru->proc.mutex_noise);
+}
+
 static void rx_rf(RU_t *ru, int *frame, int *slot)
 {
   RU_proc_t *proc = &ru->proc;
@@ -359,6 +369,123 @@ static void rx_rf(RU_t *ru, int *frame, int *slot)
   unsigned int rxs;
   rxs = ru->rfdevice.trx_read_func(&ru->rfdevice, &ts, rxp, samples_per_slot, nb);
   proc->timestamp_rx = ts-ru->ts_offset;
+
+  nfapi_nr_config_request_scf_t *config = &ru->config;
+  int slot_type = nr_slot_select(config, *frame, *slot % fp->slots_per_frame);
+
+  if (ru->cir_was_received && (slot_type == NR_UPLINK_SLOT || slot_type == NR_MIXED_SLOT)) {
+    int nb_tx = ru->nb_tx;
+    int nb_rx = ru->nb_rx;
+    cf_t pathLossLinear = {0};
+    cf_t noise_per_sample = {0};
+
+    // init common variables
+    pathLossLinear.r = ru->pathLossLinear;
+    noise_per_sample.r = ru->noise_per_sample;
+    noise_reader(ru, ru->common.noise_array, samples_per_slot, nb_rx);
+
+    // Copy and cast int16 to floats
+    for (int a_rx = 0; a_rx < nb_rx; a_rx++) {
+      c16_t *in = rxp[a_rx];
+      cf_t *out = ru->common.circular_buff[a_rx];
+      int idx = (ru->common.buffboundary + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+      int i = 0;
+      for (; i + 4 <= samples_per_slot; i += 4) {
+        simde__m128i v16 = simde_mm_loadu_si128((simde__m128i *)&in[i]); // Load 8 int16: r0,i0, r1,i1, r2,i2, r3,i3
+        simde__m128i lo32 = simde_mm_cvtepi16_epi32(v16); // Cast int16 -> int32: r0,i0, r1,i1
+        simde__m128i hi16 = simde_mm_srli_si128(v16, 8); // Shift v16 right by 8 bytes
+        simde__m128i hi32 = simde_mm_cvtepi16_epi32(hi16); // Cast int16 -> int32: r2,i2, r3,i3
+        simde__m128 lo_f = simde_mm_cvtepi32_ps(lo32); // Cast int32 -> float: r0,i0, r1,i1
+        simde__m128 hi_f = simde_mm_cvtepi32_ps(hi32); // Cast int32 -> float: r2,i2, r3,i3
+        simde_mm_storeu_ps((float *)&out[idx], lo_f); // Store 128-bits composed by 4 floats: r0,i0, r1,i1
+        simde_mm_storeu_ps((float *)&out[idx + 2], hi_f); // Store 128-bits composed by 4 floats: r2,i2, r3,i3
+        idx += 4;
+        if (idx >= ru->common.circular_buff_size)
+          idx -= ru->common.circular_buff_size;
+      }
+      // Remaining data
+      for (; i < samples_per_slot; i++) {
+        out[idx].r = (float)in[i].r;
+        out[idx].i = (float)in[i].i;
+        idx++;
+        if (idx == ru->common.circular_buff_size)
+          idx = 0;
+      }
+    }
+
+    // memcpy from circularBuff
+    for (int lp = 0; lp < ru->channel_length; lp++) {
+      pthread_mutex_lock(&ru->proc.mutex_mimo);
+      int l = ru->delayindexlist[lp]; // l: tap index number
+      pthread_mutex_unlock(&ru->proc.mutex_mimo);
+      int delayed_boundary_s = (ru->common.buffboundary - l + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+      int delayed_boundary_e =
+          (ru->common.buffboundary + samples_per_slot - l + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+      for (int a_rx = 0; a_rx < nb_rx; a_rx++) {
+        if (delayed_boundary_s < delayed_boundary_e) { // data is contiguous in the buffer
+          memcpy(&ru->common.simul_input[(nb_rx * lp + a_rx) * samples_per_slot],
+                 &ru->common.circular_buff[a_rx][delayed_boundary_s],
+                 sizeof(cf_t) * (delayed_boundary_e - delayed_boundary_s));
+        } else {
+          memcpy(&ru->common.simul_input[(nb_rx * lp + a_rx) * samples_per_slot],
+                 &ru->common.circular_buff[a_rx][delayed_boundary_s],
+                 sizeof(cf_t) * (ru->common.circular_buff_size - delayed_boundary_s)); // Copy the first half
+          memcpy(
+              &ru->common.simul_input[(nb_rx * lp + a_rx) * samples_per_slot + ru->common.circular_buff_size - delayed_boundary_s],
+              &ru->common.circular_buff[a_rx][0],
+              sizeof(cf_t) * delayed_boundary_e); // Copy the second half
+        }
+      }
+    }
+
+    ru->common.buffboundary =
+        (ru->common.buffboundary + samples_per_slot + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+
+    pthread_mutex_lock(&ru->proc.mutex_mimo);
+    // calculation C <= alpha * AB + beta * C
+    // alpha: pathLossLinear
+    // A    : (nb_rx, nb_tx*channel_length) cirMIMO_simulmatrix
+    // B    : (nb_tx*channel_length, nsamps) samples array
+    // beta : noise_per_sample
+    // C    : (nb_rx, nsamps) noise_array
+    cblas_cgemm(CblasRowMajor,
+                CblasNoTrans,
+                CblasNoTrans,
+                nb_rx, // M, A rows: MIMO rows
+                samples_per_slot, // N, B cols: sample cols
+                nb_tx * ru->channel_length, // K, A cols == B rows
+                &pathLossLinear, // alpha: path loss linear
+                ru->cirMIMO_simulmatrix, // A: MIMO matrix
+                nb_tx * ru->channel_length, // K, leading dimension == A cols
+                ru->common.simul_input, // B: samples matrix
+                samples_per_slot, // N, leading dimension == B cols
+                &noise_per_sample, // beta: noise_per_sample
+                ru->common.noise_array, // C: noise_array
+                samples_per_slot // N, leading dimension == C cols
+    );
+    pthread_mutex_unlock(&ru->proc.mutex_mimo);
+
+    // Store
+    for (int a_rx = 0; a_rx < nb_rx; a_rx++) {
+      c16_t *out = rxp[a_rx];
+      cf_t *in = &ru->common.noise_array[a_rx * samples_per_slot];
+      // Processes blocks of 4 complex numbers (8 floats) per iteration.
+      int i = 0;
+      for (; i + 4 <= samples_per_slot; i += 4) {
+        simde__m256 in_f = simde_mm256_loadu_ps((const float *)&in[i]); // Load 8 32-bit floats: r0,i0, r1,i1, r2,i2, r3,i3
+        simde__m256i in_i32 = simde_mm256_cvttps_epi32(in_f); // Cast float -> int32 with truncation: r0,i0, r1,i1, r2,i2, r3,i3
+        simde__m128i low = simde_mm256_castsi256_si128(in_i32); // Cast __m256i -> __m128i: r0,i0, r1,i1
+        simde__m128i high = simde_mm256_extracti128_si256(in_i32, 1); // Extract 128 bits, 1: dst[127:0] := a[255:128]: r2,i2, r3,i3
+        simde__m128i packed = simde_mm_packs_epi32(low, high); // Cast int32 -> int16: r0,i0, r1,i1, r2,i2, r3,i3
+        simde_mm_storeu_si128((simde__m128i *)&out[i], packed); // Store 128-bits of integer data
+      }
+      // Remaining data
+      for (; i < samples_per_slot; i++) {
+        out[i].r = (int16_t)in[i].r; // 32->16bit
+        out[i].i = (int16_t)in[i].i; // 32->16bit
+      }
+    }
+  }
 
   if (rxs != samples_per_slot)
     LOG_E(PHY, "rx_rf: Asked for %d samples, got %d from USRP\n", samples_per_slot, rxs);
@@ -487,6 +614,9 @@ static radio_tx_gpio_flag_t get_gpio_flags(RU_t *ru, int slot)
       LOG_I(HW, "slot %d, beam %d, flags_gpio %d\n", slot, beam, flags_gpio);
       break;
     }
+    case RU_GPIO_CONTROL_TMYTEK:
+      // Nothing to do
+      break;
     default:
       AssertFatal(false, "illegal GPIO controller %d\n", cfg0->gpio_controller);
   }
@@ -563,6 +693,124 @@ void tx_rf(RU_t *ru, int frame,int slot, uint64_t timestamp)
   void *txp[nt];
   for (int i = 0; i < nt; i++)
     txp[i] = (void *)&ru->common.txdata[i][get_samples_slot_timestamp(fp, slot)] - sf_extension * sizeof(int32_t);
+
+  int slot_type = nr_slot_select(cfg, frame, slot % fp->slots_per_frame);
+
+  if (ru->cir_was_received && (slot_type == NR_DOWNLINK_SLOT || slot_type == NR_MIXED_SLOT)) {
+    int a_tx;
+    int nb_tx = ru->nb_tx;
+    int nb_rx = ru->nb_rx;
+    int samples_per_slot = siglen + sf_extension;
+    cf_t pathLossLinear = {0};
+    cf_t noise_per_sample = {0};
+
+    // init common variables
+    pathLossLinear.r = ru->pathLossLinear;
+    noise_per_sample.r = ru->noise_per_sample;
+    noise_reader(ru, ru->common.noise_array, samples_per_slot, nb_tx);
+
+    // Copy and cast int16 to floats
+    for (int a_rx = 0; a_rx < nb_rx; a_rx++) {
+      c16_t *in = txp[a_rx];
+      cf_t *out = ru->common.circular_buff[a_rx];
+      int idx = (ru->common.buffboundary + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+      int i = 0;
+      for (; i + 4 <= samples_per_slot; i += 4) {
+        simde__m128i v16 = simde_mm_loadu_si128((simde__m128i *)&in[i]); // Load 8 int16: r0,i0, r1,i1, r2,i2, r3,i3
+        simde__m128i lo32 = simde_mm_cvtepi16_epi32(v16); // Cast int16 -> int32: r0,i0, r1,i1
+        simde__m128i hi16 = simde_mm_srli_si128(v16, 8); // Shift v16 right by 8 bytes
+        simde__m128i hi32 = simde_mm_cvtepi16_epi32(hi16); // Cast int16 -> int32: r2,i2, r3,i3
+        simde__m128 lo_f = simde_mm_cvtepi32_ps(lo32); // Cast int32 -> float: r0,i0, r1,i1
+        simde__m128 hi_f = simde_mm_cvtepi32_ps(hi32); // Cast int32 -> float: r2,i2, r3,i3
+        simde_mm_storeu_ps((float *)&out[idx], lo_f); // Store 128-bits composed by 4 floats: r0,i0, r1,i1
+        simde_mm_storeu_ps((float *)&out[idx + 2], hi_f); // Store 128-bits composed by 4 floats: r2,i2, r3,i3
+        idx += 4;
+        if (idx >= ru->common.circular_buff_size)
+          idx -= ru->common.circular_buff_size;
+      }
+      // Remaining data
+      for (; i < samples_per_slot; i++) {
+        out[idx].r = (float)in[i].r;
+        out[idx].i = (float)in[i].i;
+        idx++;
+        if (idx == ru->common.circular_buff_size)
+          idx = 0;
+      }
+    }
+
+    // memcpy from circularBuff
+    for (int lp = 0; lp < ru->channel_length; lp++) {
+      pthread_mutex_lock(&ru->proc.mutex_mimo);
+      int l = ru->delayindexlist[lp];
+      pthread_mutex_unlock(&ru->proc.mutex_mimo);
+      int delayed_boundary_s = (ru->common.buffboundary - l + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+      int delayed_boundary_e =
+          (ru->common.buffboundary + samples_per_slot - l + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+      for (a_tx = 0; a_tx < nb_tx; a_tx++) {
+        if (delayed_boundary_s < delayed_boundary_e) { // data is contiguous in the buffer
+          memcpy(&ru->common.simul_input[(nb_tx * lp + a_tx) * samples_per_slot],
+                 &ru->common.circular_buff[a_tx][delayed_boundary_s],
+                 sizeof(cf_t) * (delayed_boundary_e - delayed_boundary_s));
+        } else {
+          memcpy(&ru->common.simul_input[(nb_tx * lp + a_tx) * samples_per_slot],
+                 &ru->common.circular_buff[a_tx][delayed_boundary_s],
+                 sizeof(cf_t) * (ru->common.circular_buff_size - delayed_boundary_s)); // Copy the first half
+          memcpy(
+              &ru->common.simul_input[(nb_tx * lp + a_tx) * samples_per_slot + ru->common.circular_buff_size - delayed_boundary_s],
+              &ru->common.circular_buff[a_tx][0],
+              sizeof(cf_t) * delayed_boundary_e); // Copy the second half
+        }
+      }
+    }
+
+    ru->common.buffboundary =
+        (ru->common.buffboundary + samples_per_slot + ru->common.circular_buff_size) % ru->common.circular_buff_size;
+
+    pthread_mutex_lock(&ru->proc.mutex_mimo);
+    // calculation C <= alpha * AB + beta * C
+    // alpha: pathLossLinear
+    // A    : (nb_rx, nb_tx*channel_length) cirMIMO_simulmatrix
+    // B    : (nb_tx*channel_length, nsamps) samples array
+    // beta : noise_per_sample
+    // C    : (nb_rx, nsamps) noise_array
+    cblas_cgemm(CblasRowMajor,
+                CblasNoTrans,
+                CblasNoTrans,
+                nb_rx, // M, A rows: MIMO rows
+                samples_per_slot, // N, B cols: sample cols
+                nb_tx * ru->channel_length, // K, A cols == B rows
+                &pathLossLinear, // alpha: path loss linear
+                ru->cirMIMO_simulmatrix, // A: MIMO matrix
+                nb_tx * ru->channel_length, // K, leading dimension == A cols
+                ru->common.simul_input, // B: samples matrix
+                samples_per_slot, // N, leading dimension == B cols
+                &noise_per_sample, // beta: noise_per_sample
+                ru->common.noise_array, // C: noise_array
+                samples_per_slot // N, leading dimension == C cols
+    );
+    pthread_mutex_unlock(&ru->proc.mutex_mimo);
+
+    // Store
+    for (int a_tx = 0; a_tx < nb_rx; a_tx++) {
+      c16_t *out = txp[a_tx];
+      cf_t *in = &ru->common.noise_array[a_tx * samples_per_slot];
+      // Processes blocks of 4 complex numbers (8 floats) per iteration.
+      int i = 0;
+      for (; i + 4 <= samples_per_slot; i += 4) {
+        simde__m256 in_f = simde_mm256_loadu_ps((const float *)&in[i]); // Load 8 32-bit floats: r0,i0, r1,i1, r2,i2, r3,i3
+        simde__m256i in_i32 = simde_mm256_cvttps_epi32(in_f); // Cast float -> int32 with truncation: r0,i0, r1,i1, r2,i2, r3,i3
+        simde__m128i low = simde_mm256_castsi256_si128(in_i32); // Cast __m256i -> __m128i: r0,i0, r1,i1
+        simde__m128i high = simde_mm256_extracti128_si256(in_i32, 1); // Extract 128 bits, 1: dst[127:0] := a[255:128]: r2,i2, r3,i3
+        simde__m128i packed = simde_mm_packs_epi32(low, high); // Cast int32 -> int16: r0,i0, r1,i1, r2,i2, r3,i3
+        simde_mm_storeu_si128((simde__m128i *)&out[i], packed); // Store 128-bits of integer data
+      }
+      // Remaining data
+      for (; i < samples_per_slot; i++) {
+        out[i].r = (int16_t)in[i].r; // 32->16bit
+        out[i].i = (int16_t)in[i].i; // 32->16bit
+      }
+    }
+  }
 
   // prepare tx buffer pointers
   uint32_t txs = ru->rfdevice.trx_write_func(&ru->rfdevice,
@@ -1306,12 +1554,18 @@ static void NRRCconfig_RU(configmodule_interface_t *cfg)
 
     if (config_isparamset(param, RU_GPIO_CONTROL)) {
       char *str = *param[RU_GPIO_CONTROL].strptr;
-      if (strcmp(str, "generic") == 0) {
+      if (strcmp(str, "none") == 0) {
+        ru->openair0_cfg.gpio_controller = RU_GPIO_CONTROL_NONE;
+        LOG_I(PHY, "RU GPIO control set as 'none'\n");
+      } else if (strcmp(str, "generic") == 0) {
         ru->openair0_cfg.gpio_controller = RU_GPIO_CONTROL_GENERIC;
         LOG_I(PHY, "RU GPIO control set as 'generic'\n");
       } else if (strcmp(str, "interdigital") == 0) {
         ru->openair0_cfg.gpio_controller = RU_GPIO_CONTROL_INTERDIGITAL;
         LOG_I(PHY, "RU GPIO control set as 'interdigital'\n");
+      } else if (strcmp(str, "tmytek") == 0) {
+        ru->openair0_cfg.gpio_controller = RU_GPIO_CONTROL_TMYTEK;
+        LOG_I(PHY, "RU GPIO control set as 'tmytek'\n");
       } else {
         AssertFatal(false, "bad GPIO controller in configuration file: '%s'\n", str);
       }
@@ -1328,41 +1582,57 @@ static void NRRCconfig_RU(configmodule_interface_t *cfg)
       LOG_I(PHY, "RU USRP rx subdev == %s\n", ru->openair0_cfg.rx_subdev);
     }
 
-    if (config_isparamset(param, RU_SDR_CLK_SRC)) {
-      char *str = *param[RU_SDR_CLK_SRC].strptr;
-      if (strcmp(str, "internal") == 0) {
-        ru->openair0_cfg.clock_source = internal;
-        LOG_I(PHY, "RU clock source set as internal\n");
-      } else if (strcmp(str, "external") == 0) {
-        ru->openair0_cfg.clock_source = external;
-        LOG_I(PHY, "RU clock source set as external\n");
-      } else if (strcmp(str, "gpsdo") == 0) {
-        ru->openair0_cfg.clock_source = gpsdo;
-        LOG_I(PHY, "RU clock source set as gpsdo\n");
-      } else {
-        LOG_E(PHY, "Erroneous RU clock source in the provided configuration file: '%s'\n", str);
-      }
+    char *str = NULL;
+    char clock_source_str[32] = "internal";
+    if (config_isparamset(param, RU_SDR_ADDRS)) {
+      str = *param[RU_SDR_ADDRS].strptr;
+      extract_sdr_param(str, "clock_source=", clock_source_str, sizeof(clock_source_str));
+    } else if (config_isparamset(param, RU_SDR_CLK_SRC)) {
+      str = *param[RU_SDR_CLK_SRC].strptr;
+      strncpy(clock_source_str, str, 31);
+      clock_source_str[31] = '\0';
     } else {
-      LOG_D(PHY, "Setting clock source to internal\n");
+      LOG_E(PHY, "Setting clock source to internal\n");
+      ru->openair0_cfg.clock_source = internal;
+    }
+    if (strcmp(clock_source_str, "internal") == 0) {
+      ru->openair0_cfg.clock_source = internal;
+      LOG_I(PHY, "RU clock source set as internal\n");
+    } else if (strcmp(clock_source_str, "external") == 0) {
+      ru->openair0_cfg.clock_source = external;
+      LOG_I(PHY, "RU clock source set as external\n");
+    } else if (strcmp(clock_source_str, "gpsdo") == 0) {
+      ru->openair0_cfg.clock_source = gpsdo;
+      LOG_I(PHY, "RU clock source set as gpsdo\n");
+    } else {
+      LOG_E(PHY, "Erroneous RU clock source in the provided configuration file: '%s'. Reverting to internal.\n", clock_source_str);
       ru->openair0_cfg.clock_source = internal;
     }
 
+    char time_source_str[32] = "internal";
+    if (config_isparamset(param, RU_SDR_ADDRS)) {
+      str = *param[RU_SDR_ADDRS].strptr;
+      extract_sdr_param(str, "time_source=", time_source_str, sizeof(time_source_str));
+    }
     if (config_isparamset(param, RU_SDR_TME_SRC)) {
-      char *str = *param[RU_SDR_TME_SRC].strptr;
-      if (strcmp(str, "internal") == 0) {
-        ru->openair0_cfg.time_source = internal;
-        LOG_I(PHY, "RU time source set as internal\n");
-      } else if (strcmp(str, "external") == 0) {
-        ru->openair0_cfg.time_source = external;
-        LOG_I(PHY, "RU time source set as external\n");
-      } else if (strcmp(str, "gpsdo") == 0) {
-        ru->openair0_cfg.time_source = gpsdo;
-        LOG_I(PHY, "RU time source set as gpsdo\n");
-      } else {
-        LOG_E(PHY, "Erroneous RU time source in the provided configuration file: '%s'\n", str);
-      }
+      str = *param[RU_SDR_TME_SRC].strptr;
+      strncpy(time_source_str, str, 31);
+      time_source_str[31] = '\0';
     } else {
-      LOG_D(PHY, "Setting time source to internal\n");
+      LOG_E(PHY, "Setting time source to internal\n");
+      ru->openair0_cfg.time_source = internal;
+    }
+    if (strcmp(time_source_str, "internal") == 0) {
+      ru->openair0_cfg.time_source = internal;
+      LOG_I(PHY, "RU time source set as internal\n");
+    } else if (strcmp(time_source_str, "external") == 0) {
+      ru->openair0_cfg.time_source = external;
+      LOG_I(PHY, "RU time source set as external\n");
+    } else if (strcmp(time_source_str, "gpsdo") == 0) {
+      ru->openair0_cfg.time_source = gpsdo;
+      LOG_I(PHY, "RU time source set as gpsdo\n");
+    } else {
+      LOG_E(PHY, "Erroneous RU time source in the provided configuration file: '%s'. Reverting to internal.\n", time_source_str);
       ru->openair0_cfg.time_source = internal;
     }
 

@@ -10,7 +10,7 @@
 #include "common/ran_context.h"
 #include "openair2/LAYER2/NR_MAC_gNB/mac_proto.h"
 #include "openair2/LAYER2/nr_rlc/nr_rlc_oai_api.h"
-#include "openair2/E2AP/flexric/src/util/time_now_us.h"
+#include "util/time_now_us.h"
 
 static
 uint32_t num_act_rb(NR_UEs_t* const UE_info)

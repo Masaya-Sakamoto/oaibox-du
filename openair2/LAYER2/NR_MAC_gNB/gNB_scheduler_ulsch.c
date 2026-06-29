@@ -146,6 +146,36 @@ bwp_info_t get_pusch_bwp_start_size(NR_UE_info_t *UE)
   return bwp_info;
 }
 
+nssai_bwp_info_t get_pusch_nssai_start_size(gNB_MAC_INST *nrmac, NR_UE_info_t *UE)
+{
+  NR_UE_UL_BWP_t *ul_bwp = &UE->current_UL_BWP;
+  NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+  nssai_bwp_info_t nssai_bwp_info;
+  nssai_bwp_info.prb_start = 0;
+  nssai_bwp_info.num_prbs = ul_bwp->BWPSize;
+  nssai_bwp_info.slice_active = false;
+
+  uint8_t prev_sst = 0;
+  for (int j = 0; j < seq_arr_size(&nrmac->nssai_config_ul); j++) {
+    const nssai_config_t *n = seq_arr_at(&nrmac->nssai_config_ul, j);
+    if (n->sst > prev_sst) {
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); i++) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        if (c->nssai.sst == n->sst && c->nssai.sd == n->sd) {
+          nssai_bwp_info.prb_start = n->prb_start;
+          nssai_bwp_info.num_prbs = n->num_prbs;
+          prev_sst = n->sst;
+          nssai_bwp_info.slice_active = true;
+          LOG_D(NR_MAC, "UL: SST %d start PRB %d num_prbs %d\n", c->nssai.sst, nssai_bwp_info.prb_start, nssai_bwp_info.num_prbs);
+          break;
+        }
+      }
+    }
+  }
+
+  return nssai_bwp_info;
+}
+
 static float compute_ph_rb_factor(int mu, int rb)
 {
   return roundf(10 * log10(rb << mu));
@@ -2383,6 +2413,11 @@ static int collect_ul_candidates(gNB_MAC_INST *mac,
 
     bwp_info_t bi = get_pusch_bwp_start_size(UE);
 
+    nssai_bwp_info_t nssai_bwp_info = {0};
+    if (UE->current_UL_BWP.dci_format == NR_UL_DCI_FORMAT_0_1) {
+      nssai_bwp_info = get_pusch_nssai_start_size(mac, UE);
+    }
+
     /* QoS / slice info, extract from first DRB for external policies */
     uint64_t fiveQI = 0;
     int lc_priority = 0;
@@ -2418,6 +2453,9 @@ static int collect_ul_candidates(gNB_MAC_INST *mac,
     cand.fiveQI = fiveQI;
     cand.priority = lc_priority;
     cand.nssai = nssai;
+    cand.slice_start = nssai_bwp_info.prb_start;
+    cand.slice_size = nssai_bwp_info.num_prbs;
+    cand.slice_active = nssai_bwp_info.slice_active;
     cand.cqi = cqi;
     cand.beam_rsrp = UE->beam_rsrp;
     cand.beam_sinr = UE->beam_sinr;
@@ -2442,9 +2480,17 @@ static int collect_ul_candidates(gNB_MAC_INST *mac,
       continue;
     }
 
+    uint32_t ulsch_max_frame_inactivity = mac->ulsch_max_frame_inactivity;
+    // Apply NSSAI specific scheduling coefficients, set ulsch_max_frame_inactivity to 0 for URLLC slice and HDLLC
+    for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); ++i) {
+      const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+      if (c->nssai.sst == 2 || c->nssai.sst == 6) {
+        ulsch_max_frame_inactivity = 0;
+        break;
+      }
+    }
     const int B = max(0, sched_ctrl->estimated_ul_buffer - sched_ctrl->sched_ul_bytes);
-    const bool do_sched =
-        nr_UE_is_to_be_scheduled(&mac->frame_structure, UE, sched_frame, sched_slot, mac->ulsch_max_frame_inactivity);
+    const bool do_sched = nr_UE_is_to_be_scheduled(&mac->frame_structure, UE, sched_frame, sched_slot, ulsch_max_frame_inactivity);
 
     LOG_D(NR_MAC, "collect_ul_candidates: do_sched UE %04x => %s\n", UE->rnti, do_sched ? "yes" : "no");
     if ((B == 0 && !do_sched) || nr_timer_is_active(&sched_ctrl->transm_interrupt))

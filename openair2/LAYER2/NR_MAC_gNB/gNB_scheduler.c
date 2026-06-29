@@ -129,6 +129,7 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   clear_beam_information(&gNB->beam_info, frame, slot, slots_frame);
 
   gNB->frame = frame;
+  gNB->slot = slot;
   start_meas(&gNB->gNB_scheduler);
 
   for (int CC_id = 0; CC_id < MAX_NUM_CCs; CC_id++) {

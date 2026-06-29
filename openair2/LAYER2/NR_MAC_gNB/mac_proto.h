@@ -51,6 +51,8 @@ void clear_nr_nfapi_information(gNB_MAC_INST *gNB, int CC_idP, frame_t frameP, s
 
 void nr_mac_update_timers(module_id_t module_id);
 
+void nr_bwp_switching(module_id_t module_id, uint32_t ran_ue_id, int bwp_id);
+
 void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame_rxP, slot_t slot_rxP, NR_Sched_Rsp_t *sched_info);
 
 /* \brief main DL scheduler function. Calls a preprocessor to decide on
@@ -490,6 +492,8 @@ bool commit_alloc(const nr_dl_sched_params_t *params, nr_dl_candidate_t *cand);
     if ((n_sched) >= (params)->max_num_ue)                             \
       return (n_sched);                                                \
   } while (0)
+
+float get_nssai_sched_coeff(uint8_t sst);
 
 int ul_buffer_index(int frame, int slot, int slots_per_frame, int size);
 void UL_tti_req_ahead_initialization(gNB_MAC_INST *gNB, int n, int CCid, frame_t frameP, int slotP);

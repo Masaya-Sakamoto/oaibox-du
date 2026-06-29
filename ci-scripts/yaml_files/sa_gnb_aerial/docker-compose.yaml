@@ -17,27 +17,32 @@ services:
     stdin_open: true
     tty: true
     volumes:
+      - /home/user/aerial-cuda-accelerated-ran:/opt/nvidia/cuBB/
+      - ./cuphycontroller_P5G_BENETEL.yaml:/opt/nvidia/cuBB/cuPHY-CP/cuphycontroller/config/cuphycontroller_P5G_BENETEL.yaml
       - /lib/modules:/lib/modules
       - /dev/hugepages:/dev/hugepages
       - /usr/src:/usr/src
-      - ./cuphycontroller_P5G_WNC_GH.yaml:/opt/nvidia/cuBB/cuPHY-CP/cuphycontroller/config/cuphycontroller_P5G_WNC_GH.yaml
       - ./aerial_l1_entrypoint.sh:/opt/nvidia/cuBB/aerial_l1_entrypoint.sh
+      - ./l1_config.yaml:/opt/nvidia/cuBB/l1_config.yaml
+      - ./nvlog_config.yaml:/opt/nvidia/cuBB/nvlog_config.yaml
       - /var/log/aerial:/var/log/aerial
       - ../../../cmake_targets/share:/opt/cuBB/share
     userns_mode: host
     ipc: "shareable"
-    image: cubb-build:25-3
+    image: nvcr.io/nvidia/aerial/aerial-cuda-accelerated-ran:25-3-cubb
     environment:
       - cuBB_SDK=/opt/nvidia/cuBB
-    command: bash -c "sudo rm -rf /tmp/phy.log && sudo chmod +x /opt/nvidia/cuBB/aerial_l1_entrypoint.sh && /opt/nvidia/cuBB/aerial_l1_entrypoint.sh"
+      - NVIDIA_VISIBLE_DEVICES=MIG-0b4581b9-3ffb-5b08-85f3-d125ae9e589e
+      - CUDA_VISIBLE_DEVICES=MIG-0b4581b9-3ffb-5b08-85f3-d125ae9e589e
+    command: bash -c "sudo rm -rf /var/log/aerial/phy.log && sudo chmod +x /opt/nvidia/cuBB/aerial_l1_entrypoint.sh && /opt/nvidia/cuBB/aerial_l1_entrypoint.sh"
     healthcheck:
-      test: ["CMD-SHELL",'grep -q "L1 is ready!" /tmp/phy.log && echo 0 || echo 1']
+      test: ["CMD-SHELL",'grep -q "L1 is ready!" /var/log/aerial/phy.log && echo 0 || echo 1']
       interval: 20s
       timeout: 5s
       retries: 5
-  oai-gnb-aerial:
-    cpuset: "13-16"
-    image: ${REGISTRY-oaisoftwarealliance/}${GNB_IMG:-oai-gnb-aerial}:${TAG:-develop}
+  oaibox-gnb:
+    cpuset: "16-20"
+    image: nexus.allbesmart.pro/oaibox/ai_ran/gnb:OAIBOX_2026.06.2
     depends_on:
       nv-cubb:
         condition: service_healthy
@@ -48,7 +53,7 @@ services:
       - IPC_LOCK
     ipc: "container:nv-cubb"
     environment:
-      USE_ADDITIONAL_OPTIONS: --log_config.global_log_options level,nocolor,utc_time
+      USE_ADDITIONAL_OPTIONS: --log_config.global_log_options level,nocolor,time
     deploy:
       resources:
         reservations:
@@ -61,8 +66,8 @@ services:
     shm_size: 4096m
     tty: true
     volumes:
-      - ../../conf_files/gnb-vnf.sa.band78.273prb.aerial.conf:/opt/oai-gnb/etc/gnb.conf
-    container_name: oai-gnb-aerial
+      - /home/user/.oaibox/oaibox.yaml:/opt/oai-gnb/etc/gnb.yaml
+    container_name: oaibox-gnb
     healthcheck:
       test: /bin/bash -c "ps aux | grep -v grep | grep -c softmodem"
       interval: 10s

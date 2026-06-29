@@ -5,7 +5,7 @@
 #ifndef RAN_FUNC_SM_RAN_CTRL_SUBSCRIPTION_AGENT_H
 #define RAN_FUNC_SM_RAN_CTRL_SUBSCRIPTION_AGENT_H
 
-#include "openair2/E2AP/flexric/src/sm/rc_sm/ie/rc_data_ie.h"
+#include "sm/rc_sm/ie/rc_data_ie.h"
 #include "common/utils/ds/seq_arr.h"
 
 typedef struct ran_param_data {

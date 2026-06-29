@@ -161,7 +161,7 @@ typedef enum {
   {CONFIG_STRING_RU_SDR_ADDRS,                 NULL,                              0,       .strptr=NULL,     .defstrval="type=b200",       TYPE_STRING,      0}, \
   {CONFIG_STRING_RU_SDR_CLK_SRC,               NULL,                              0,       .strptr=NULL,     .defstrval="internal",        TYPE_STRING,      0}, \
   {CONFIG_STRING_RU_SDR_TME_SRC,               NULL,                              0,       .strptr=NULL,     .defstrval="internal",        TYPE_STRING,      0}, \
-  {CONFIG_STRING_RU_SF_EXTENSION,              NULL,                              0,       .uptr=NULL,       .defuintval=320,              TYPE_UINT,        0}, \
+  {CONFIG_STRING_RU_SF_EXTENSION,              NULL,                              0,       .uptr=NULL,       .defuintval=0,                TYPE_UINT,        0}, \
   {CONFIG_STRING_RU_END_OF_BURST_DELAY,        NULL,                              0,       .uptr=NULL,       .defuintval=400,              TYPE_UINT,        0}, \
   {CONFIG_STRING_RU_OTA_SYNC_ENABLE,           NULL,                              0,       .strptr=NULL,     .defstrval="no",              TYPE_STRING,      0}, \
   {CONFIG_STRING_RU_BF_WEIGHTS_LIST,           NULL,                              0,       .iptr=NULL,       .defintarrayval=DEFBFW,       TYPE_INTARRAY,    0}, \
@@ -181,7 +181,7 @@ typedef enum {
   {CONFIG_STRING_RU_NUM_INTERFACES,            HLP_RU_NUM_INTERFACES,             0,       .uptr=NULL,       .defintval=1,                 TYPE_UINT,        0}, \
   {CONFIG_STRING_RU_HALF_SLOT_PARALLELIZATION, HLP_RU_HALF_SLOT_PARALLELIZATION,  0,       .uptr=NULL,       .defintval=1,                 TYPE_UINT,        0}, \
   {CONFIG_STRING_RU_RU_THREAD_CORE,            HLP_RU_RU_THREAD_CORE,             0,       .iptr=NULL,       .defintval=-1,                TYPE_INT,         0}, \
-  {CONFIG_STRING_RU_GPIO_CONTROL,              HLP_RU_GPIO_CONTROL,               0,       .strptr=NULL,     .defstrval="generic",         TYPE_STRING,      0}, \
+  {CONFIG_STRING_RU_GPIO_CONTROL,              HLP_RU_GPIO_CONTROL,               0,       .strptr=NULL,     .defstrval="none",            TYPE_STRING,      0}, \
 }
 // clang-format on
 

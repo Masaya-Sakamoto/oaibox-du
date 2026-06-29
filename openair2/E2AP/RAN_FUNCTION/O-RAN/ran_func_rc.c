@@ -6,11 +6,11 @@
 #include "ran_func_rc_subs.h"
 #include "ran_func_rc_extern.h"
 #include "ran_e2sm_ue_id.h"
-#include "../../flexric/src/sm/rc_sm/ie/ir/lst_ran_param.h"
-#include "../../flexric/src/sm/rc_sm/ie/ir/ran_param_list.h"
-#include "../../flexric/src/agent/e2_agent_api.h"
-#include "openair2/E2AP/flexric/src/lib/sm/enc/enc_ue_id.h"
-#include "openair2/E2AP/flexric/src/sm/rc_sm/rc_sm_id.h"
+#include "sm/rc_sm/ie/ir/lst_ran_param.h"
+#include "sm/rc_sm/ie/ir/ran_param_list.h"
+#include "agent/e2_agent_api.h"
+#include "lib/sm/enc/enc_ue_id.h"
+#include "sm/rc_sm/rc_sm_id.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -871,21 +871,45 @@ sm_ag_if_ans_t write_subs_rc_sm(void const* src)
   return ans;
 }
 
-
-sm_ag_if_ans_t write_ctrl_rc_sm(void const* data)
+static void process_frmt1_action1(const rc_ctrl_req_data_t *ctrl)
 {
-  assert(data != NULL);
-//  assert(data->type == RAN_CONTROL_CTRL_V1_03 );
+  assert(ctrl->hdr.frmt_1.ric_style_type == 3 && ctrl->hdr.frmt_1.ctrl_act_id == 1 &&
+         "Implemented only for handover control");
 
-  rc_ctrl_req_data_t const* ctrl = (rc_ctrl_req_data_t const*)data;
+  int target_cellid = -1;
+  const e2sm_rc_ctrl_msg_frmt_1_t *frmt_1 = &ctrl->msg.frmt_1;
+  int sz = frmt_1->sz_ran_param;
+  for (int i = 0; i < sz; i++) {
+    seq_ran_param_t *ho_param = &frmt_1->ran_param[i];
+    if (ho_param->ran_param_id == 1 &&
+        ho_param->ran_param_val.type == ELEMENT_KEY_FLAG_TRUE_RAN_PARAMETER_VAL_TYPE &&
+        ho_param->ran_param_val.flag_true->type == INTEGER_RAN_PARAMETER_VALUE) {
+      target_cellid = ho_param->ran_param_val.flag_true->int_ran;
+    }
+  }
 
-  assert(ctrl->hdr.format == FORMAT_1_E2SM_RC_CTRL_HDR && "Indication Header Format received not valid");
-  assert(ctrl->msg.format == FORMAT_1_E2SM_RC_CTRL_MSG && "Indication Message Format received not valid");
-  assert(ctrl->hdr.frmt_1.ctrl_act_id == 2 && "Currently only QoS flow mapping configuration supported");
+  if (target_cellid == -1) {
+    LOG_E(NR_RRC, "Target primary cell ID not found\n");
+    return;
+  }
 
+  if (ctrl->hdr.frmt_1.ue_id.type != GNB_DU_UE_ID_E2SM) {
+    LOG_E(NR_RRC, "UE ID not found in message\n");
+    return;
+  }
+  int ue_id = ctrl->hdr.frmt_1.ue_id.gnb_du.gnb_cu_ue_f1ap;
+
+  LOG_I(NR_RRC, "Triggering handover for ueId %d with target primary cell ID %i\n", ue_id, target_cellid);
+
+  gNB_RRC_INST *rrc = RC.nrrrc[0];
+  rrc->xapp.trigger_f1_ho(rrc, ue_id, target_cellid);
+}
+
+static void process_frmt1_action2(const rc_ctrl_req_data_t *ctrl)
+{
   printf("QoS flow mapping configuration\n");
 
-  const seq_ran_param_t* ran_param = ctrl->msg.frmt_1.ran_param;
+  const seq_ran_param_t *ran_param = ctrl->msg.frmt_1.ran_param;
 
   // DRB ID
   assert(ran_param[0].ran_param_id == 1 && "First RAN Parameter ID has to be DRB ID");
@@ -916,7 +940,28 @@ sm_ag_if_ans_t write_ctrl_rc_sm(void const* data)
   assert(dir == 0 || dir == 1);
 
   printf("qfi = %ld, dir %ld \n", qfi, dir);
+}
 
+sm_ag_if_ans_t write_ctrl_rc_sm(void const* data)
+{
+  assert(data != NULL);
+
+  rc_ctrl_req_data_t const* ctrl = (rc_ctrl_req_data_t const*)data;
+
+  assert(ctrl->hdr.format == FORMAT_1_E2SM_RC_CTRL_HDR && "Indication Header Format received not valid");
+  assert(ctrl->msg.format == FORMAT_1_E2SM_RC_CTRL_MSG && "Indication Message Format received not valid");
+
+  switch (ctrl->hdr.frmt_1.ctrl_act_id) {
+  case 1:
+    process_frmt1_action1(ctrl);
+    break;
+  case 2:
+    process_frmt1_action2(ctrl);
+    break;
+  default:
+    AssertFatal(0 == 1, "Invalid or not implemented control action ID %i\n", ctrl->hdr.frmt_1.ctrl_act_id);
+    break;
+  }
 
   sm_ag_if_ans_t ans = {.type = CTRL_OUTCOME_SM_AG_IF_ANS_V0};
   ans.ctrl_out.type = RAN_CTRL_V1_3_AGENT_IF_CTRL_ANS_V0;

@@ -4,10 +4,10 @@
 
 #include "ran_func_mac.h"
 #include <assert.h>
+#include "oai_asn1.h"
 
 static
 const int mod_id = 0;
-
 
 bool read_mac_sm(void* data)
 {
@@ -18,7 +18,8 @@ bool read_mac_sm(void* data)
 
   mac->msg.tstamp = time_now_us();
 
-  NR_UEs_t *UE_info = &RC.nrmac[mod_id]->UE_info;
+  gNB_MAC_INST *nrmac = RC.nrmac[mod_id];
+  NR_UEs_t *UE_info = &nrmac->UE_info;
   size_t num_ues = 0;
   UE_iterator(UE_info->connected_ue_list, ue) {
     if (ue)
@@ -38,18 +39,23 @@ bool read_mac_sm(void* data)
     const NR_UE_sched_ctrl_t* sched_ctrl = &UE->UE_sched_ctrl;
     mac_ue_stats_impl_t* rd = &mac->msg.ue_stats[i];
 
-    rd->frame = RC.nrmac[mod_id]->frame;
+    rd->in_sync = !sched_ctrl->ul_failure;
+    struct NR_PLMN_IdentityInfo *plmn_IdentityInfo =
+        nrmac->common_channels[0]
+            .sib1->message.choice.c1->choice.systemInformationBlockType1->cellAccessRelatedInfo.plmn_IdentityInfoList.list.array[0];
+    rd->nr_cellid  = BIT_STRING_to_uint64(&plmn_IdentityInfo->cellIdentity);
+    rd->frame = nrmac->frame;
     rd->slot = 0; // previously had slot info, but the gNB runs multiple slots
                   // in parallel, so this has no real meaning
 
     rd->dl_aggr_tbs = UE->mac_stats.dl.total_bytes;
     rd->ul_aggr_tbs = UE->mac_stats.ul.total_bytes;
 
-    if (is_dl_slot(rd->slot, &RC.nrmac[mod_id]->frame_structure)) {
+    if (is_dl_slot(rd->slot, &nrmac->frame_structure)) {
       rd->dl_curr_tbs = UE->mac_stats.dl.current_bytes;
       rd->dl_sched_rb = UE->mac_stats.dl.current_rbs;
     }
-    if (is_ul_slot(rd->slot, &RC.nrmac[mod_id]->frame_structure)) {
+    if (is_ul_slot(rd->slot, &nrmac->frame_structure)) {
       rd->ul_curr_tbs = UE->mac_stats.ul.current_bytes;
       rd->ul_sched_rb = UE->mac_stats.ul.current_rbs;
     }
@@ -66,8 +72,8 @@ bool read_mac_sm(void* data)
     rd->dl_aggr_sdus = UE->mac_stats.dl.num_mac_sdu;
     rd->ul_aggr_sdus = UE->mac_stats.ul.num_mac_sdu;
 
-    rd->pusch_snr = sched_ctrl->pusch_pc.avg_snr; //: float = -64;
-    rd->pucch_snr = sched_ctrl->pucch_pc.avg_snr; //: float = -64;
+    rd->pusch_snr = nr_mac_get_snr(&sched_ctrl->pusch_pc);
+    rd->pucch_snr = nr_mac_get_snr(&sched_ctrl->pucch_pc);
 
     rd->wb_cqi = sched_ctrl->CSI_report.cri_ri_li_pmi_cqi_report.wb_cqi_1tb;
     rd->dl_mcs1 = sched_ctrl->dl_bler_stats.mcs;
@@ -77,6 +83,23 @@ bool read_mac_sm(void* data)
     rd->dl_mcs2 = 0;
     rd->ul_mcs2 = 0;
     rd->phr = sched_ctrl->ph;
+
+    rd->pcmax = sched_ctrl->pcmax;
+    rd->pmi_cqi_ri = sched_ctrl->CSI_report.cri_ri_li_pmi_cqi_report.ri + 1;
+    rd->pmi_cqi_X1 = sched_ctrl->CSI_report.cri_ri_li_pmi_cqi_report.pmi_x1;
+    rd->pmi_cqi_X2 = sched_ctrl->CSI_report.cri_ri_li_pmi_cqi_report.pmi_x2;
+    rd->raw_rssi = -128.0 + sched_ctrl->pusch_pc.avg_rssi * 0.1;
+    uint8_t cqi = (sched_ctrl->pucch_pc.avg_snr + 640) / 5.0;
+    if (cqi > 15) {
+      cqi = 15;
+    }
+    rd->cqi = cqi;
+    if (sched_ctrl->CSI_report.cri_ri_li_pmi_cqi_report.wb_cqi_1tb != 0) {
+      rd->cqi = sched_ctrl->CSI_report.cri_ri_li_pmi_cqi_report.wb_cqi_1tb;
+    }
+    rd->rsrp = UE->mac_stats.num_rsrp_meas > 0 ? UE->mac_stats.cumul_rsrp / UE->mac_stats.num_rsrp_meas : 0;
+    rd->dl_qm = nr_get_Qm_dl(sched_ctrl->dl_bler_stats.mcs, UE->current_DL_BWP.mcsTableIdx);
+    rd->ul_qm = nr_get_Qm_ul(sched_ctrl->ul_bler_stats.mcs, UE->current_UL_BWP.mcs_table);
 
     const uint32_t bufferSize = sched_ctrl->estimated_ul_buffer - sched_ctrl->sched_ul_bytes;
     rd->bsr = bufferSize;
@@ -103,14 +126,99 @@ bool read_mac_sm(void* data)
 void read_mac_setup_sm(void* data)
 {
   assert(data != NULL);
-  assert(0 !=0 && "Not supported");
+
+  //mac_ctrl_req_data_t* mac_ctrl_req = (mac_ctrl_req_data_t*)data;
+
+  //sm_ag_if_ans_t ans = {.type = CTRL_OUTCOME_SM_AG_IF_ANS_V0};
+  //ans.subs_out.type = APERIODIC_SUBSCRIPTION_FLRC;
+
+  return;
 }
 
 sm_ag_if_ans_t write_ctrl_mac_sm(void const* data)
 {
   assert(data != NULL);
-  printf("write_ctrl callback for MAC SM: operation not supported\n");
-  sm_ag_if_ans_t ans = {0};
+
+  mac_ctrl_req_data_t* mac_ctrl_req = (mac_ctrl_req_data_t*)data;
+
+  // SST 0 not defined in standard
+  if (mac_ctrl_req->msg.sst > 0) {
+    gNB_MAC_INST* mac = RC.nrmac[mod_id];
+
+    uint8_t sst = mac_ctrl_req->msg.sst;
+    uint32_t sd = mac_ctrl_req->msg.sd;
+    bool dl_create = true;
+    bool ul_create = true;
+
+    for (size_t i = 0; i < seq_arr_size(&mac->nssai_config_dl); i++) {
+      nssai_config_t* c = seq_arr_at(&mac->nssai_config_dl, i);
+      if (c->sst == sst && c->sd == sd) {
+        if (mac_ctrl_req->msg.dl_num_prbs == 0) {
+          LOG_A(NR_MAC, "Deleting DL SST %d SD %d\n", c->sst, c->sd);
+          seq_arr_erase(&mac->nssai_config_dl, c);
+        } else {
+          c->prb_start = mac_ctrl_req->msg.dl_start_prb;
+          c->num_prbs = mac_ctrl_req->msg.dl_num_prbs;
+          LOG_A(NR_MAC, "Updating DL SST %d SD %d PRB Start %d num PRBs %d\n", c->sst, c->sd, c->prb_start, c->num_prbs);
+        }
+        dl_create = false;
+        break;
+      }
+    }
+    for (size_t i = 0; i < seq_arr_size(&mac->nssai_config_ul); i++) {
+      nssai_config_t* c = seq_arr_at(&mac->nssai_config_ul, i);
+      if (c->sst == sst && c->sd == sd) {
+        if (mac_ctrl_req->msg.ul_num_prbs == 0) {
+          LOG_A(NR_MAC, "Deleting UL SST %d SD %d\n", c->sst, c->sd);
+          seq_arr_erase(&mac->nssai_config_ul, c);
+        } else {
+          c->prb_start = mac_ctrl_req->msg.ul_start_prb;
+          c->num_prbs = mac_ctrl_req->msg.ul_num_prbs;
+          LOG_A(NR_MAC, "Updating UL SST %d SD %d PRB Start %d num PRBs %d\n", c->sst, c->sd, c->prb_start, c->num_prbs);
+        }
+        ul_create = false;
+        break;
+      }
+    }
+    if (dl_create && mac_ctrl_req->msg.dl_num_prbs > 0) {
+      nssai_config_t c;
+      c.sst = sst;
+      c.sd = sd;
+      c.prb_start = mac_ctrl_req->msg.dl_start_prb;
+      c.num_prbs = mac_ctrl_req->msg.dl_num_prbs;
+      seq_arr_push_back(&mac->nssai_config_dl, &c, sizeof(nssai_config_t));
+      LOG_A(NR_MAC, "Creating DL SST %d SD %d PRB Start %d num PRBs %d\n", c.sst, c.sd, c.prb_start, c.num_prbs);
+    }
+
+    if (ul_create && mac_ctrl_req->msg.ul_num_prbs > 0) {
+      nssai_config_t c;
+      c.sst = sst;
+      c.sd = sd;
+      c.prb_start = mac_ctrl_req->msg.ul_start_prb;
+      c.num_prbs = mac_ctrl_req->msg.ul_num_prbs;
+      seq_arr_push_back(&mac->nssai_config_ul, &c, sizeof(nssai_config_t));
+      LOG_A(NR_MAC, "Creating UL SST %d SD %d PRB Start %d num PRBs %d\n", c.sst, c.sd, c.prb_start, c.num_prbs);
+    }
+  }
+
+  // BeamID: from 1 to 64
+  if (mac_ctrl_req->msg.rx_beam_id > 0 && mac_ctrl_req->msg.tx_beam_id > 0) {
+    RU_t* ru = RC.ru[0];
+    ru->rfdevice.beam_switching(mac_ctrl_req->msg.rx_beam_id, mac_ctrl_req->msg.tx_beam_id);
+  }
+
+  // BWP switching
+  if (mac_ctrl_req->msg.ue_id > 0) {
+    LOG_I(NR_MAC,
+          "MAC SM triggering BWP switching for UE ID %d with dl_bwp_id %d and ul_bwp_id %d\n",
+          mac_ctrl_req->msg.ue_id,
+          mac_ctrl_req->msg.dl_bwp_id,
+          mac_ctrl_req->msg.ul_bwp_id);
+    nr_bwp_switching(mod_id, mac_ctrl_req->msg.ue_id, mac_ctrl_req->msg.dl_bwp_id);
+  }
+
+  sm_ag_if_ans_t ans = {.type = CTRL_OUTCOME_SM_AG_IF_ANS_V0};
+  ans.subs_out.type = APERIODIC_SUBSCRIPTION_FLRC;
+
   return ans;
 }
-

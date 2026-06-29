@@ -310,7 +310,7 @@ static uint32_t update_dlsch_buffer(frame_t frame, slot_t slot, NR_UE_info_t *UE
   /* loop over all activated logical channels */
   FOR_EACH_SEQ_ARR(const nr_lc_config_t *, c, &sched_ctrl->lc_config ) {
     logical_chan_id_t lcid = c->lcid;
-    if (c->suspended || (lcid == DL_SCH_LCID_DTCH && nr_timer_is_active(&sched_ctrl->transm_interrupt))) {
+    if (c->suspended || (lcid >= DL_SCH_LCID_DTCH && (UE->reconfigCellGroup || nr_timer_is_active(&sched_ctrl->transm_interrupt)))) {
       memset(&sched_ctrl->rlc_status[lcid], 0, sizeof(sched_ctrl->rlc_status[lcid]));
       continue;
     }
@@ -404,6 +404,36 @@ bwp_info_t get_pdsch_bwp_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE)
   return bwp_info;
 }
 
+nssai_bwp_info_t get_pdsch_nssai_start_size(gNB_MAC_INST *nr_mac, NR_UE_info_t *UE)
+{
+  NR_UE_DL_BWP_t *dl_bwp = &UE->current_DL_BWP;
+  NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+
+  nssai_bwp_info_t nssai_bwp_info;
+  nssai_bwp_info.prb_start = 0;
+  nssai_bwp_info.num_prbs = dl_bwp->BWPSize;
+  nssai_bwp_info.slice_active = false;
+
+  uint8_t prev_sst = 0;
+  for (int j = 0; j < seq_arr_size(&nr_mac->nssai_config_dl); j++) {
+    const nssai_config_t *n = seq_arr_at(&nr_mac->nssai_config_dl, j);
+    if (n->sst > prev_sst) {
+      for (int i = 0; i < seq_arr_size(&sched_ctrl->lc_config); i++) {
+        const nr_lc_config_t *c = seq_arr_at(&sched_ctrl->lc_config, i);
+        if (c->nssai.sst == n->sst && c->nssai.sd == n->sd) {
+          nssai_bwp_info.prb_start = n->prb_start;
+          nssai_bwp_info.num_prbs = n->num_prbs;
+          prev_sst = n->sst;
+          nssai_bwp_info.slice_active = true;
+          LOG_D(NR_MAC, "DL: SST %d start PRB %d num_prbs %d\n", c->nssai.sst, nssai_bwp_info.prb_start, nssai_bwp_info.num_prbs);
+          break;
+        }
+      }
+    }
+  }
+  return nssai_bwp_info;
+}
+
 static void ack_reconfig(gNB_MAC_INST *mac, NR_UE_info_t *UE)
 {
   if (!UE->reconfigCellGroup) {
@@ -469,6 +499,12 @@ static int collect_dl_candidates(gNB_MAC_INST *mac,
     int harq_pid = sched_ctrl->retrans_dl_harq.head;
     const NR_bler_options_t *bo = &mac->dl_bler;
     bwp_info_t bwp_info = get_pdsch_bwp_start_size(mac, UE);
+
+    nssai_bwp_info_t nssai_bwp_info = {0};
+    if (UE->current_DL_BWP.dci_format == NR_DL_DCI_FORMAT_1_1) {
+      nssai_bwp_info = get_pdsch_nssai_start_size(mac, UE);
+    }
+
     const int max_mcs_table = current_BWP->mcsTableIdx == 1 ? 27 : 28;
     const int max_mcs = min(sched_ctrl->dl_max_mcs, min(max_mcs_table, bo->max_mcs));
 
@@ -515,6 +551,9 @@ static int collect_dl_candidates(gNB_MAC_INST *mac,
           .fiveQI = fiveQI,
           .priority = lc_priority,
           .nssai = nssai,
+          .slice_start = nssai_bwp_info.prb_start,
+          .slice_size = nssai_bwp_info.num_prbs,
+          .slice_active = nssai_bwp_info.slice_active,
           /* CSI observations */
           .cqi = cqi,
           .csi_ri = csi_ri,
@@ -559,6 +598,9 @@ static int collect_dl_candidates(gNB_MAC_INST *mac,
           .fiveQI = fiveQI,
           .priority = lc_priority,
           .nssai = nssai,
+          .slice_start = nssai_bwp_info.prb_start,
+          .slice_size = nssai_bwp_info.num_prbs,
+          .slice_active = nssai_bwp_info.slice_active,
           /* CSI observations */
           .cqi = cqi,
           .csi_ri = csi_ri,

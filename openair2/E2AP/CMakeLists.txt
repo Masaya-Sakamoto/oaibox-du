@@ -1,17 +1,13 @@
 # SPDX-License-Identifier: LicenseRef-CSSL-1.0
 
-# Check that the submodule exists or init+update if not 
-if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/flexric/CMakeLists.txt)
-  message(STATUS "E2AP submoduled not detected, therefore $git submodule init && git submodule update.")
-  execute_process(COMMAND git submodule init)
-  execute_process(COMMAND git submodule update) 
-else()
-  message(STATUS "E2AP submodule detected.")
+# FLEXRIC_DIR is resolved by the top-level CMakeLists.txt before this file is
+# processed. Guard against being included standalone without it.
+if(NOT DEFINED FLEXRIC_DIR)
+  message(FATAL_ERROR
+    "FLEXRIC_DIR is not set. This directory must be included via the top-level "
+    "CMakeLists.txt with E2_AGENT=ON.")
 endif()
-
-if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/flexric/CMakeLists.txt)
-  message(FATAL_ERROR "The submodules for E2 agent were not downloaded!")
-endif()
+message(STATUS "FlexRIC (E2AP): using source at ${FLEXRIC_DIR}")
 
 
 set(BUILDING_LIBRARY "STATIC" CACHE STRING "Static or dynamic library")
@@ -83,26 +79,26 @@ message(STATUS "Selected GTP SM_ENCODING: ${SM_ENCODING_GTP}")
 
 
 if(E2AP_VERSION STREQUAL "E2AP_V1")
-  add_library(e2ap_ran_func_obj OBJECT 
-              flexric/src/lib/e2ap/v1_01/e2ap_types/common/e2ap_ran_function.c )
-  add_library(e2ap_plmn_obj OBJECT 
-              flexric/src/lib/e2ap/v1_01/e2ap_types/common/e2ap_plmn.c )
-  add_library(e2ap_global_node_id_obj OBJECT 
-              flexric/src/lib/e2ap/v1_01/e2ap_types/common/e2ap_global_node_id.c )
+  add_library(e2ap_ran_func_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v1_01/e2ap_types/common/e2ap_ran_function.c )
+  add_library(e2ap_plmn_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v1_01/e2ap_types/common/e2ap_plmn.c )
+  add_library(e2ap_global_node_id_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v1_01/e2ap_types/common/e2ap_global_node_id.c )
 elseif(E2AP_VERSION STREQUAL "E2AP_V2")
-  add_library(e2ap_ran_func_obj OBJECT 
-              flexric/src/lib/e2ap/v2_03/e2ap_types/common/e2ap_ran_function.c )
-  add_library(e2ap_plmn_obj OBJECT 
-              flexric/src/lib/e2ap/v2_03/e2ap_types/common/e2ap_plmn.c )
-  add_library(e2ap_global_node_id_obj OBJECT 
-              flexric/src/lib/e2ap/v2_03/e2ap_types/common/e2ap_global_node_id.c )
+  add_library(e2ap_ran_func_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v2_03/e2ap_types/common/e2ap_ran_function.c )
+  add_library(e2ap_plmn_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v2_03/e2ap_types/common/e2ap_plmn.c )
+  add_library(e2ap_global_node_id_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v2_03/e2ap_types/common/e2ap_global_node_id.c )
 elseif(E2AP_VERSION STREQUAL "E2AP_V3")
-  add_library(e2ap_ran_func_obj OBJECT 
-              flexric/src/lib/e2ap/v3_01/e2ap_types/common/e2ap_ran_function.c )
-  add_library(e2ap_plmn_obj OBJECT 
-              flexric/src/lib/e2ap/v3_01/e2ap_types/common/e2ap_plmn.c )
-  add_library(e2ap_global_node_id_obj OBJECT 
-              flexric/src/lib/e2ap/v3_01/e2ap_types/common/e2ap_global_node_id.c )
+  add_library(e2ap_ran_func_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v3_01/e2ap_types/common/e2ap_ran_function.c )
+  add_library(e2ap_plmn_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v3_01/e2ap_types/common/e2ap_plmn.c )
+  add_library(e2ap_global_node_id_obj OBJECT
+              ${FLEXRIC_DIR}/src/lib/e2ap/v3_01/e2ap_types/common/e2ap_global_node_id.c )
 else()
   message(FATAL_ERROR "E2AP Unknown version selected")
 endif()
@@ -123,11 +119,11 @@ if(E2AP_ENCODING STREQUAL "FLATBUFFERS")
     )
 endif()
 
-include_directories(flexric/src)
-add_subdirectory(flexric/src/agent)
-add_subdirectory(flexric/src/lib)
-add_subdirectory(flexric/src/sm)
-add_subdirectory(flexric/src/util)
+include_directories(${FLEXRIC_DIR}/src)
+add_subdirectory(${FLEXRIC_DIR}/src/agent agent)
+add_subdirectory(${FLEXRIC_DIR}/src/lib   lib)
+add_subdirectory(${FLEXRIC_DIR}/src/sm    sm)
+add_subdirectory(${FLEXRIC_DIR}/src/util  util)
 add_subdirectory(RAN_FUNCTION)
 
 add_library(e2_agent_arg STATIC e2_agent_arg.c)
