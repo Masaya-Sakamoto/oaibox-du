@@ -39,8 +39,8 @@ gNBs:
           dl_absoluteFrequencyPointA: 2077435
           dl_offstToCarrier: 0
           dl_subcarrierSpacing: 3
-          dl_carrierBandwidth: 66
-          initialDLBWPlocationAndBandwidth: 17875
+          dl_carrierBandwidth: 132
+          initialDLBWPlocationAndBandwidth: 36025
           initialDLBWPsubcarrierSpacing: 3
           initialDLBWPcontrolResourceSetZero: 2
           initialDLBWPsearchSpaceZero: 0
@@ -48,9 +48,9 @@ gNBs:
           ul_absoluteFrequencyPointA: 2077435
           ul_offstToCarrier: 0
           ul_subcarrierSpacing: 3
-          ul_carrierBandwidth: 66
+          ul_carrierBandwidth: 132
           pMax: 26
-          initialULBWPlocationAndBandwidth: 17875
+          initialULBWPlocationAndBandwidth: 36025
           initialULBWPsubcarrierSpacing: 3
           prach_ConfigurationIndex: 117
           prach_msg1_FDM: 0
@@ -151,9 +151,9 @@ RUs:
       eNB_instances:
         - 0
       gpio_controller: tmytek
-      clock_src: internal
-      time_src: internal
-      sdr_addrs: type=x4xx,serial=36C8A8B,model=X410,mgmt_addr=192.168.10.2,addr=192.168.10.2,second_addr=192.168.11.2,clock_source=internal,time_source=internal
+      clock_src: gpsdo
+      time_src: gpsdo
+      sdr_addrs: type=x4xx,serial=36C8A8B,model=X410,mgmt_addr=192.168.10.2,addr=192.168.10.2,second_addr=192.168.11.2,clock_source=gpsdo,time_source=gpsdo
 opt:
     type: none
     address: 127.0.0.1
